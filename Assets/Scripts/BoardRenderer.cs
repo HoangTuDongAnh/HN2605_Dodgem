@@ -2,19 +2,31 @@
 using System.Collections;
 using System.Collections.Generic;
 
+// ================================================================
+// BoardRenderer — hiển thị bàn cờ, quân, animation, highlight
+//
+// THAY ĐỔI SO VỚI BẢN CŨ:
+//   - HighlightSelected nhận playerIdx + state để xác định exit marker
+//   - GridToWorld dùng state.boardSize thay vì hardcode 3
+//   - BoardIndex dùng state.boardSize thay vì hardcode 3
+//   - Render dùng players[] thay vì whitePieces/blackPieces
+//   - cells[] và pieceObjs[][] được sinh động theo boardSize (Init)
+//
+// Backward-compat: cells[] public vẫn dùng được cho 3x3 hand-setup.
+// ================================================================
+
 public class BoardRenderer : MonoBehaviour
 {
     [Header("Prefabs")]
-    public GameObject whitePiecePrefab;
-    public GameObject blackPiecePrefab;
+    public GameObject whitePiecePrefab;   // Trắng (players[0])
+    public GameObject blackPiecePrefab;   // Đen   (players[1])
+    // Giai đoạn 3 sẽ thêm redPiecePrefab, bluePiecePrefab
 
-    // 9 ô bàn cờ — thứ tự:
-    // 0=(0,0) 1=(1,0) 2=(2,0)
-    // 3=(0,1) 4=(1,1) 5=(2,1)
-    // 6=(0,2) 7=(1,2) 8=(2,2)
+    // 9 ô bàn cờ (3x3 hand-setup) — index: y*3+x
+    // Khi Giai đoạn 2A xong sẽ được sinh động
     public GameObject[] cells = new GameObject[9];
 
-    // 1 ô exit duy nhất phía trên bàn, CellClick.gridPos = (0,3)
+    // 1 ô exit duy nhất phía trên bàn (dùng cho Đen 3x3)
     public GameObject blackExitCell;
 
     [Header("Colors")]
@@ -22,58 +34,53 @@ public class BoardRenderer : MonoBehaviour
     public Color validMoveColor  = new Color(0.3f,  0.9f,  0.3f, 1f);
     public Color exitColor       = new Color(0.2f,  0.7f,  1f,   1f);
     public Color normalCellColor = new Color(0.75f, 0.75f, 0.75f, 1f);
-    public Color whitePieceColor = new Color(0.95f, 0.95f, 0.95f, 1f);
-    public Color blackPieceColor = new Color(0.15f, 0.15f, 0.15f, 1f);
 
     [Header("Layout & Animation")]
     public float cellSize  = 2f;
     public float moveSpeed = 8f;
 
-    // ── Private ───────────────────────────────────────────────────────
-    private GameObject[]     whitePieceObjs = new GameObject[2];
-    private GameObject[]     blackPieceObjs = new GameObject[2];
-    private SpriteRenderer[] cellSR         = new SpriteRenderer[9];
+    // ── Private ───────────────────────────────────────────────────
+    // pieceObjs[playerIdx][pieceIdx]
+    private GameObject[][]   pieceObjs;
+    private SpriteRenderer[] cellSR       = new SpriteRenderer[9];
     private SpriteRenderer   exitSR;
-    private bool             initialized    = false;
+    private bool             initialized  = false;
 
-    // ── Dùng Start thay Awake để đảm bảo Prefab đã được load trên WebGL ──
-    void Start()
-    {
-        Init();
-    }
+    // Cache boardSize dùng khi không có state
+    private int cachedBoardSize = 3;
 
-    // Gọi thủ công từ GameManager nếu cần đảm bảo init trước Render()
+    // ── Init ──────────────────────────────────────────────────────
+    void Start() { Init(); }
+
     public void Init()
     {
         if (initialized) return;
         initialized = true;
 
-        // Kiểm tra prefab trước khi Instantiate
         if (whitePiecePrefab == null || blackPiecePrefab == null)
+        { Debug.LogError("[BoardRenderer] Prefab chưa gán!"); return; }
+
+        // Với 3x3 2 người: tạo 2 phe, mỗi phe 2 quân
+        // Giai đoạn 2 sẽ gọi InitForState(state) thay thế
+        var prefabs = new[] { whitePiecePrefab, blackPiecePrefab };
+        pieceObjs   = new GameObject[2][];
+        for (int p = 0; p < 2; p++)
         {
-            Debug.LogError("[BoardRenderer] Prefab chưa gán trong Inspector!");
-            return;
+            pieceObjs[p] = new GameObject[2];
+            for (int i = 0; i < 2; i++)
+            {
+                pieceObjs[p][i] = Instantiate(prefabs[p]);
+                pieceObjs[p][i].name = $"Player{p}_Piece{i}";
+            }
         }
 
-        for (int i = 0; i < 2; i++)
-        {
-            whitePieceObjs[i] = Instantiate(whitePiecePrefab);
-            blackPieceObjs[i] = Instantiate(blackPiecePrefab);
-            SetColor(whitePieceObjs[i], whitePieceColor);
-            SetColor(blackPieceObjs[i], blackPieceColor);
-
-            // Đặt tên để dễ debug
-            whitePieceObjs[i].name = $"WhitePiece_{i}";
-            blackPieceObjs[i].name = $"BlackPiece_{i}";
-        }
-
-        // Cache SpriteRenderer 9 ô
+        // Cache SR 9 ô
         for (int i = 0; i < 9; i++)
         {
             if (i < cells.Length && cells[i] != null)
                 cellSR[i] = GetSR(cells[i]);
-            else
-                Debug.LogError($"[BoardRenderer] cells[{i}] chưa gán trong Inspector!");
+            else if (i < cells.Length)
+                Debug.LogError($"[BoardRenderer] cells[{i}] chưa gán!");
         }
 
         // Exit cell — ẩn ngay
@@ -86,55 +93,59 @@ public class BoardRenderer : MonoBehaviour
         ResetAllColors();
     }
 
-    // ── Render tức thì ────────────────────────────────────────────────
+    // ── Render tức thì ────────────────────────────────────────────
     public void Render(GameState state)
     {
-        Init(); // đảm bảo đã init
+        Init();
+        cachedBoardSize = state.boardSize;
 
-        for (int i = 0; i < 2; i++)
+        // Đảm bảo có đủ pieceObjs cho số phe hiện tại
+        EnsurePieceObjs(state);
+
+        for (int p = 0; p < state.NumPlayers && p < pieceObjs.Length; p++)
         {
-            if (whitePieceObjs[i] == null || blackPieceObjs[i] == null) continue;
-
-            bool wa = state.whitePieces[i].x != -1;
-            whitePieceObjs[i].SetActive(wa);
-            if (wa) whitePieceObjs[i].transform.position = GridToWorld(state.whitePieces[i]);
-
-            bool ba = state.blackPieces[i].x != -1;
-            blackPieceObjs[i].SetActive(ba);
-            if (ba) blackPieceObjs[i].transform.position = GridToWorld(state.blackPieces[i]);
+            var player = state.players[p];
+            for (int i = 0; i < player.pieces.Length && i < pieceObjs[p].Length; i++)
+            {
+                bool active = player.pieces[i].x != -1;
+                pieceObjs[p][i].SetActive(active);
+                if (active)
+                    pieceObjs[p][i].transform.position = GridToWorld(player.pieces[i], state.boardSize);
+            }
         }
         ResetAllColors();
     }
 
-    // ── Render có animation ───────────────────────────────────────────
+    // ── Render có animation ───────────────────────────────────────
     public IEnumerator RenderAnimated(GameState oldState, GameState newState)
     {
         Init();
         ResetAllColors();
+        EnsurePieceObjs(newState);
         var anims = new List<Coroutine>();
 
-        for (int i = 0; i < 2; i++)
+        for (int p = 0; p < newState.NumPlayers && p < pieceObjs.Length; p++)
         {
-            if (whitePieceObjs[i] == null || blackPieceObjs[i] == null) continue;
+            var oldP = oldState.players[p];
+            var newP = newState.players[p];
 
-            bool wWas = oldState.whitePieces[i].x != -1;
-            bool wNow = newState.whitePieces[i].x != -1;
-            if (wWas && wNow && oldState.whitePieces[i] != newState.whitePieces[i])
-                anims.Add(StartCoroutine(Slide(whitePieceObjs[i], GridToWorld(newState.whitePieces[i]))));
-            else if (wWas && !wNow)
+            for (int i = 0; i < oldP.pieces.Length && i < pieceObjs[p].Length; i++)
             {
-                Vector3 ex = GridToWorld(oldState.whitePieces[i]) + new Vector3(cellSize * 1.5f, 0, 0);
-                anims.Add(StartCoroutine(SlideAndHide(whitePieceObjs[i], ex)));
-            }
+                bool was = oldP.pieces[i].x != -1;
+                bool now = newP.pieces[i].x != -1;
 
-            bool bWas = oldState.blackPieces[i].x != -1;
-            bool bNow = newState.blackPieces[i].x != -1;
-            if (bWas && bNow && oldState.blackPieces[i] != newState.blackPieces[i])
-                anims.Add(StartCoroutine(Slide(blackPieceObjs[i], GridToWorld(newState.blackPieces[i]))));
-            else if (bWas && !bNow)
-            {
-                Vector3 ex = GridToWorld(oldState.blackPieces[i]) + new Vector3(0, cellSize * 1.5f, 0);
-                anims.Add(StartCoroutine(SlideAndHide(blackPieceObjs[i], ex)));
+                if (was && now && oldP.pieces[i] != newP.pieces[i])
+                {
+                    anims.Add(StartCoroutine(
+                        Slide(pieceObjs[p][i], GridToWorld(newP.pieces[i], newState.boardSize))));
+                }
+                else if (was && !now)
+                {
+                    // Thoát theo hướng escape
+                    Vector3 exit = GridToWorld(oldP.pieces[i], oldState.boardSize)
+                                 + ExitOffset(newP.escapeDir, newState.boardSize);
+                    anims.Add(StartCoroutine(SlideAndHide(pieceObjs[p][i], exit)));
+                }
             }
         }
 
@@ -142,22 +153,59 @@ public class BoardRenderer : MonoBehaviour
         Render(newState);
     }
 
-    // ── Highlight ─────────────────────────────────────────────────────
-    public void HighlightSelected(Vector2Int selected, List<Vector2Int> validMoves)
+    // ── Highlight ─────────────────────────────────────────────────
+    // Nhận playerIdx để biết escape marker của phe nào
+    public void HighlightSelected(Vector2Int selected, List<Vector2Int> validMoves,
+                                  int playerIdx, GameState state)
     {
         ResetAllColors();
+        int N = state.boardSize;
 
-        int si = BoardIndex(selected);
-        if (si >= 0 && cellSR[si] != null) cellSR[si].color = selectedColor;
+        // Tô vàng ô quân chọn
+        int si = BoardIndex(selected, N);
+        if (si >= 0 && si < cellSR.Length && cellSR[si] != null)
+            cellSR[si].color = selectedColor;
 
         bool hasEscape = false;
         foreach (var mv in validMoves)
         {
-            if (mv.y == 3) { hasEscape = true; continue; }
-            int idx = BoardIndex(mv);
-            if (idx >= 0 && cellSR[idx] != null) cellSR[idx].color = validMoveColor;
+            // Ô thoát: nằm ngoài biên
+            if (!DodgemRules.InBounds(mv, N))
+            {
+                hasEscape = true;
+                continue;
+            }
+            int idx = BoardIndex(mv, N);
+            if (idx >= 0 && idx < cellSR.Length && cellSR[idx] != null)
+                cellSR[idx].color = validMoveColor;
         }
 
+        // Hiện exit cell nếu có nước thoát
+        if (hasEscape && blackExitCell != null)
+        {
+            blackExitCell.SetActive(true);
+            if (exitSR != null) exitSR.color = exitColor;
+        }
+    }
+
+    // Backward-compat (BoardRenderer cũ không có playerIdx)
+    public void HighlightSelected(Vector2Int selected, List<Vector2Int> validMoves)
+    {
+        ResetAllColors();
+        int N = cachedBoardSize;
+
+        int si = BoardIndex(selected, N);
+        if (si >= 0 && si < cellSR.Length && cellSR[si] != null)
+            cellSR[si].color = selectedColor;
+
+        bool hasEscape = false;
+        foreach (var mv in validMoves)
+        {
+            if (!DodgemRules.InBounds(mv, N)) { hasEscape = true; continue; }
+            int idx = BoardIndex(mv, N);
+            if (idx >= 0 && idx < cellSR.Length && cellSR[idx] != null)
+                cellSR[idx].color = validMoveColor;
+        }
         if (hasEscape && blackExitCell != null)
         {
             blackExitCell.SetActive(true);
@@ -167,25 +215,73 @@ public class BoardRenderer : MonoBehaviour
 
     public void ResetAllColors()
     {
-        for (int i = 0; i < 9; i++)
-            if (cellSR[i] != null) cellSR[i].color = normalCellColor;
+        foreach (var sr in cellSR)
+            if (sr != null) sr.color = normalCellColor;
 
         if (blackExitCell != null) blackExitCell.SetActive(false);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────
-    public Vector3 GridToWorld(Vector2Int grid)
+    // ── Helpers ───────────────────────────────────────────────────
+    public Vector3 GridToWorld(Vector2Int grid, int boardSize)
     {
-        float offset = (3 - 1) / 2f * cellSize;
+        float offset = (boardSize - 1) / 2f * cellSize;
         return new Vector3(grid.x * cellSize - offset,
                            grid.y * cellSize - offset, 0f);
     }
 
-    public int BoardIndex(Vector2Int pos)
+    // Backward-compat (dùng cachedBoardSize)
+    public Vector3 GridToWorld(Vector2Int grid)
+        => GridToWorld(grid, cachedBoardSize);
+
+    public int BoardIndex(Vector2Int pos, int boardSize)
     {
-        if (pos.x < 0 || pos.x > 2 || pos.y < 0 || pos.y > 2) return -1;
-        int idx = pos.y * 3 + pos.x;
-        return idx < 9 ? idx : -1;
+        if (pos.x < 0 || pos.x >= boardSize || pos.y < 0 || pos.y >= boardSize) return -1;
+        return pos.y * boardSize + pos.x;
+    }
+
+    public int BoardIndex(Vector2Int pos)
+        => BoardIndex(pos, cachedBoardSize);
+
+    // Offset animation khi quân thoát ra ngoài bàn
+    Vector3 ExitOffset(EscapeDirection dir, int boardSize)
+    {
+        float d = cellSize * 1.5f;
+        switch (dir)
+        {
+            case EscapeDirection.Right:  return new Vector3( d,  0, 0);
+            case EscapeDirection.Top:    return new Vector3( 0,  d, 0);
+            case EscapeDirection.Left:   return new Vector3(-d,  0, 0);
+            case EscapeDirection.Bottom: return new Vector3( 0, -d, 0);
+            default: return new Vector3(d, 0, 0);
+        }
+    }
+
+    // Đảm bảo pieceObjs có đủ slot cho state.NumPlayers
+    void EnsurePieceObjs(GameState state)
+    {
+        if (pieceObjs == null) pieceObjs = new GameObject[0][];
+        if (pieceObjs.Length >= state.NumPlayers) return;
+
+        // Mở rộng mảng (giữ phần tử cũ)
+        var old = pieceObjs;
+        pieceObjs = new GameObject[state.NumPlayers][];
+        for (int i = 0; i < old.Length; i++) pieceObjs[i] = old[i];
+
+        // Tạo thêm cho các phe mới (dùng màu từ PlayerData)
+        for (int p = old.Length; p < state.NumPlayers; p++)
+        {
+            var player  = state.players[p];
+            int nPieces = player.pieces.Length;
+            pieceObjs[p] = new GameObject[nPieces];
+
+            // Dùng whitePiecePrefab làm base, sau đó đổi màu
+            for (int i = 0; i < nPieces; i++)
+            {
+                pieceObjs[p][i] = Instantiate(whitePiecePrefab);
+                pieceObjs[p][i].name = $"Player{p}_Piece{i}";
+                SetColor(pieceObjs[p][i], player.pieceColor);
+            }
+        }
     }
 
     SpriteRenderer GetSR(GameObject go)

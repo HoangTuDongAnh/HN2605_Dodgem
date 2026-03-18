@@ -1,103 +1,149 @@
-﻿public static class EvalFunction
-{
-    // ================================================================
-    // Trắng (AI) thoát sang PHẢI (x tăng)
-    // Đen (người) thoát lên TRÊN (y tăng)
-    //
-    // Nguyên tắc điểm: dương = tốt cho Trắng, âm = tốt cho Đen
-    // ================================================================
+﻿using UnityEngine;
 
+// ================================================================
+// EvalFunction — hàm đánh giá trạng thái cho AI
+//
+// THAY ĐỔI SO VỚI BẢN CŨ:
+//   - Bỏ bảng điểm cố định {0,5,10} → tính theo tỉ lệ boardSize
+//   - Bỏ hardcode boardSize=3 trong BlockingScore
+//   - Thêm Eval(state, playerIdx) cho Paranoid AI sau này
+//   - Eval(state) không tham số vẫn hoạt động (backward-compat)
+//
+// Quy ước điểm: dương = tốt cho players[0] (Trắng/AI)
+// ================================================================
+
+public static class EvalFunction
+{
+    // ── Eval không tham số — backward-compat cho AlphaBetaAI ─────
+    // Luôn đánh giá từ góc nhìn của players[0] (Trắng)
     public static int Eval(GameState state)
     {
-        // Kết thúc tuyệt đối
-        if (state.whiteEscaped == 2) return  20000;
-        if (state.blackEscaped == 2) return -20000;
+        return Eval(state, perspectivePlayerIdx: 0);
+    }
+
+    // ── Eval có tham số — dùng cho Paranoid AI (Giai đoạn 3) ─────
+    // perspectivePlayerIdx: phe nào muốn maximize điểm
+    public static int Eval(GameState state, int perspectivePlayerIdx)
+    {
+        int N = state.boardSize;
+
+        // Kiểm tra kết thúc
+        var winner = state.Winner();
+        if (winner != null)
+            return winner.playerIndex == perspectivePlayerIdx ? 20000 : -20000;
 
         int score = 0;
 
-        // ── 1. Thưởng lớn cho quân đã thoát ─────────────────────────
-        score += state.whiteEscaped * 500;
-        score -= state.blackEscaped * 500;
-
-        int whitePiecesOnBoard = 0;
-        int blackPiecesOnBoard = 0;
-
-        // ── 2. Điểm tiến về đích ─────────────────────────────────────
-        foreach (var wp in state.whitePieces)
+        for (int i = 0; i < state.NumPlayers; i++)
         {
-            if (wp.x == -1) continue;
-            whitePiecesOnBoard++;
-            // Trắng tiến phải: x=0→0, x=1→20, x=2→50 (phi tuyến — gần đích thưởng nhiều hơn)
-            score += wp.x == 0 ? 0 : wp.x == 1 ? 20 : 50;
+            var player  = state.players[i];
+            int sign    = (i == perspectivePlayerIdx) ? 1 : -1;
+            int pScore  = ScoreForPlayer(player, N);
+            score      += sign * pScore;
         }
 
-        foreach (var bp in state.blackPieces)
-        {
-            if (bp.x == -1) continue;
-            blackPiecesOnBoard++;
-            // Đen tiến lên: y=0→0, y=1→20, y=2→50
-            score -= bp.y == 0 ? 0 : bp.y == 1 ? 20 : 50;
-        }
-
-        // ── 3. Thưởng AI còn quân — tránh để quân bị kẹt ────────────
-        // Nếu Trắng không còn quân nào trên bàn mà chưa thắng → rất tệ
-        if (whitePiecesOnBoard == 0 && state.whiteEscaped < 2) score -= 1000;
-        if (blackPiecesOnBoard == 0 && state.blackEscaped < 2) score += 1000;
-
-        // ── 4. Điểm cản (quan trọng nhất trong Dodgem) ───────────────
-        score += BlockingScore(state);
-
-        // ── 5. Phạt nếu AI bị chặn hoàn toàn ────────────────────────
-        // Đếm nước đi có thể của Trắng — càng ít càng xấu cho AI
-        int whiteMoves = CountMoves(state, isWhite: true);
-        int blackMoves = CountMoves(state, isWhite: false);
-        if (whiteMoves == 0) score -= 800;  // Trắng hết nước đi rất xấu
-        if (blackMoves == 0) score += 400;  // Đen hết nước đi tốt cho Trắng
+        // Thưởng thêm: phe hiện tại có nhiều nước đi hơn thì tốt hơn
+        score += MobilityBonus(state, perspectivePlayerIdx);
 
         return score;
     }
 
-    static int BlockingScore(GameState state)
+    // ── Điểm của một phe ─────────────────────────────────────────
+    static int ScoreForPlayer(PlayerData player, int boardSize)
     {
         int score = 0;
-        foreach (var bp in state.blackPieces)
+        int N     = boardSize;
+
+        // Thưởng lớn mỗi quân đã thoát
+        score += player.escaped * 500;
+
+        // Điểm tiến gần đích — phi tuyến, gần cuối thưởng nhiều hơn
+        foreach (var pos in player.pieces)
         {
-            if (bp.x == -1) continue;
-            foreach (var wp in state.whitePieces)
+            if (pos.x == -1) continue;
+
+            // Khoảng cách đến đích (0 = ngay trước cửa thoát)
+            int distToEscape = DistanceToEscape(pos, player.escapeDir, N);
+            int maxDist      = N - 1;
+
+            // Điểm phi tuyến: càng gần đích điểm càng cao
+            // dist=N-1 → 0, dist=1 → 50, dist=0 → 100
+            int posScore = (int)(100f * (1f - (float)distToEscape / maxDist));
+            score += posScore;
+        }
+
+        return score;
+    }
+
+    // ── Khoảng cách đến ô thoát ───────────────────────────────────
+    static int DistanceToEscape(Vector2Int pos, EscapeDirection dir, int boardSize)
+    {
+        int N = boardSize;
+        switch (dir)
+        {
+            case EscapeDirection.Right:  return (N - 1) - pos.x;  // cần đi thêm bao nhiêu ô sang phải
+            case EscapeDirection.Top:    return (N - 1) - pos.y;
+            case EscapeDirection.Left:   return pos.x;             // cần đi thêm bao nhiêu ô sang trái
+            case EscapeDirection.Bottom: return pos.y;
+            default: return N;
+        }
+    }
+
+    // ── Điểm cản ─────────────────────────────────────────────────
+    // Kiểm tra quân của phe perspective có đang cản quân đối thủ không
+    static int BlockingScore(GameState state, int perspectiveIdx)
+    {
+        int score = 0;
+        int N     = state.boardSize;
+        var me    = state.players[perspectiveIdx];
+
+        for (int oppIdx = 0; oppIdx < state.NumPlayers; oppIdx++)
+        {
+            if (oppIdx == perspectiveIdx) continue;
+            var opp = state.players[oppIdx];
+
+            foreach (var myPos in me.pieces)
             {
-                if (wp.x == -1) continue;
+                if (myPos.x == -1) continue;
+                foreach (var oppPos in opp.pieces)
+                {
+                    if (oppPos.x == -1) continue;
 
-                // ── Trắng cản Đen đi lên ──────────────────────────────
-                // Trắng đứng ngay trên Đen (cùng cột, wp.y = bp.y+1)
-                if (wp.x == bp.x && wp.y == bp.y + 1)
-                    score += 60;  // cản trực tiếp
-                // Trắng cách 2 ô nhưng cùng cột
-                else if (wp.x == bp.x && wp.y == bp.y + 2)
-                    score += 30;  // cản gián tiếp
+                    // Quân của tôi đứng ngay trên đường tiến của đối thủ
+                    // → kiểm tra myPos có nằm phía trước oppPos theo hướng đi của đối thủ
+                    var oppFwd = opp.ForwardDir();
 
-                // ── Đen cản Trắng đi phải ─────────────────────────────
-                // Đen đứng ngay bên phải Trắng (cùng hàng, bp.x = wp.x+1)
-                if (bp.y == wp.y && bp.x == wp.x + 1)
-                    score -= 60;
-                else if (bp.y == wp.y && bp.x == wp.x + 2)
-                    score -= 30;
-
-                // ── Thưởng thêm: Trắng cản toàn bộ đường thoát Đen ───
-                // Nếu Trắng đứng trên hàng y=2 cùng cột với Đen đang ở y=2
-                // → Đen không thể thoát lên
-                if (wp.y == 2 && bp.y == 2 && wp.x == bp.x)
-                    score += 80;
+                    // Cản trực tiếp: myPos = oppPos + oppFwd
+                    if (myPos == oppPos + oppFwd)
+                        score += 60;
+                    // Cản gián tiếp: myPos = oppPos + 2*oppFwd
+                    else if (myPos == oppPos + oppFwd + oppFwd)
+                        score += 30;
+                }
             }
         }
         return score;
     }
 
-    // Đếm số nước đi hợp lệ của một bên (dùng DodgemRules)
-    static int CountMoves(GameState state, bool isWhite)
+    // ── Mobility bonus ────────────────────────────────────────────
+    // Thưởng nếu phe perspective có nhiều nước đi hơn đối thủ
+    static int MobilityBonus(GameState state, int perspectiveIdx)
     {
-        // Tạo state giả với lượt của bên cần đếm
         var tmp = state.Clone();
-        tmp.isWhiteTurn = isWhite;
-        return DodgemRules.GetChildren(tmp).Count;
+        tmp.currentPlayerIndex = perspectiveIdx;
+        int myMoves = DodgemRules.GetChildren(tmp).Count;
+
+        if (myMoves == 0) return -800;   // hết nước đi rất xấu
+
+        int oppMoves = 0;
+        for (int i = 0; i < state.NumPlayers; i++)
+        {
+            if (i == perspectiveIdx) continue;
+            tmp.currentPlayerIndex = i;
+            oppMoves += DodgemRules.GetChildren(tmp).Count;
+        }
+        if (oppMoves == 0) return 400;   // đối thủ hết nước đi tốt
+
+        return 0;
     }
 }
