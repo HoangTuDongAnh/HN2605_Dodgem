@@ -161,6 +161,8 @@ MonoBehaviour:
   boardRenderer: {fileID: 308396764}
   statusText: {fileID: 1012412897}
   restartButton: {fileID: 2141996100}
+  backToMenuButton: {fileID: 0}
+  gameConfig: {fileID: 0}
 --- !u!4 &83017919
 Transform:
   m_ObjectHideFlags: 0
@@ -293,6 +295,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::BoardRenderer
   whitePiecePrefab: {fileID: 7732819866756634973, guid: 4328a2d72e659d742906514514a8cefe, type: 3}
   blackPiecePrefab: {fileID: 6946983189480026998, guid: c466423de9890754898f2dc8074bc4b3, type: 3}
+  cellPrefab: {fileID: 0}
+  exitCellPrefab: {fileID: 0}
   cells:
   - {fileID: 592386640}
   - {fileID: 47728413}
@@ -308,10 +312,9 @@ MonoBehaviour:
   validMoveColor: {r: 0.3, g: 0.9, b: 0.3, a: 1}
   exitColor: {r: 0.2, g: 0.7, b: 1, a: 1}
   normalCellColor: {r: 0.75, g: 0.75, b: 0.75, a: 1}
-  whitePieceColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
-  blackPieceColor: {r: 0.1, g: 0.1, b: 0.1, a: 1}
   cellSize: 2
   moveSpeed: 8
+  boardScreenSize: 8
 --- !u!4 &308396765
 Transform:
   m_ObjectHideFlags: 0

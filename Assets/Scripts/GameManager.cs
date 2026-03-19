@@ -5,71 +5,106 @@ using System.Collections.Generic;
 using TMPro;
 
 // ================================================================
-// GameManager — điều phối toàn bộ luồng game
-//
-// THAY ĐỔI SO VỚI BẢN CŨ:
-//   - Đọc cấu hình từ GameConfig (boardSize, numPlayers, types)
-//   - Lượt chơi dùng currentPlayerIndex thay vì isWhiteTurn
-//   - Hỗ trợ nhiều Bot chạy tuần tự
-//   - Escape logic dùng boardSize thay vì hardcode y==2, y==3
-//   - Backward-compat: nếu không có GameConfig → dùng mặc định 3x3
+// GameManager — phien ban preset
+// THAY DOI: them StartGameFromPreset(), bo GameConfig dependency
 // ================================================================
 
 public class GameManager : MonoBehaviour
 {
     [Header("References")]
-    public BoardRenderer   boardRenderer;
+    public BoardRenderer  boardRenderer;
+    public BoardGenerator boardGenerator;
+    public Camera         mainCamera;
+
+    [Header("UI — Game Panel")]
     public TextMeshProUGUI statusText;
     public Button          restartButton;
 
-    [Header("Config (tùy chọn — để trống = dùng mặc định 3x3)")]
-    public GameConfig gameConfig;
-
-    // ── Private state ─────────────────────────────────────────────
+    // ── Private ───────────────────────────────────────────────────
     private GameState        currentState;
-    private AlphaBetaAI[]    bots;          // 1 bot instance cho mỗi phe
-    private bool             isAnimating = false;
-
-    // Chọn quân (chỉ dùng khi lượt Human)
+    private GamePreset       lastPreset;
+    private PlayerType[]     lastOverrideTypes;
+    private int[]            lastOverrideDepths;
+    private AlphaBetaAI[]    bots;
+    private bool             isAnimating  = false;
     private Vector2Int       selectedPiece = new Vector2Int(-1, -1);
     private List<Vector2Int> validMoves    = new List<Vector2Int>();
 
-    // ── Init ──────────────────────────────────────────────────────
     void Start()
     {
-        if (boardRenderer == null)
-        { Debug.LogError("[GameManager] boardRenderer chưa gán!"); return; }
-
         if (restartButton != null)
             restartButton.onClick.AddListener(RestartGame);
-
-        boardRenderer.Init();
-        StartGame();
     }
 
-    void StartGame()
+    // ── Goi tu MenuManager voi preset da chon ────────────────────
+    public void StartGameFromPreset(GamePreset preset,
+                                    PlayerType[] overrideTypes,
+                                    int[]        overrideDepths)
     {
-        // Tạo state từ config (hoặc mặc định)
-        currentState = GameState.CreateDefault(gameConfig);
+        lastPreset         = preset;
+        lastOverrideTypes  = overrideTypes;
+        lastOverrideDepths = overrideDepths;
+        StopAllCoroutines();
+        InitGame();
+    }
 
-        // Tạo bot cho mỗi phe Bot
+    // ── Restart: dung lai preset lan truoc ───────────────────────
+    public void RestartGame()
+    {
+        StopAllCoroutines();
+        InitGame();
+    }
+
+    // ── Khoi tao game ─────────────────────────────────────────────
+    void InitGame()
+    {
+        if (lastPreset == null)
+        { Debug.LogError("[GameManager] Chua co preset!"); return; }
+
+        // 1. Tao GameState tu preset
+        currentState = GameState.CreateFromPreset(
+            lastPreset, lastOverrideTypes, lastOverrideDepths);
+        if (currentState == null) return;
+
+        // 2. Sinh ban co
+        boardGenerator.Generate(currentState);
+
+        // 3. Setup renderer
+        boardRenderer.SetupFromGenerator(boardGenerator, currentState);
+
+        // 4. Tao bots
         bots = new AlphaBetaAI[currentState.NumPlayers];
         for (int i = 0; i < currentState.NumPlayers; i++)
         {
             var p = currentState.players[i];
             if (p.type == PlayerType.Bot)
-                bots[i] = new AlphaBetaAI(depth: p.botDepth);
+                // Truyen myPlayerIndex = i de moi bot biet minh la phe nao
+                // Bot se maximize diem cua chinh minh, khong phai cua Trang
+                bots[i] = new AlphaBetaAI(depth: p.botDepth, myPlayerIndex: i);
         }
 
+        // 5. Camera fit
+        FitCamera(currentState.boardSize);
+
+        // 6. Reset
         Deselect();
         isAnimating = false;
         boardRenderer.Render(currentState);
 
-        // Bắt đầu lượt của người đầu tiên
         StartCoroutine(HandleTurn());
     }
 
-    // ── Vòng lặp lượt chơi ────────────────────────────────────────
+    void FitCamera(int boardSize)
+    {
+        if (mainCamera == null) mainCamera = Camera.main;
+        if (mainCamera == null || boardGenerator == null) return;
+        float cs        = boardGenerator.cellSize;
+        float halfBoard = (boardSize - 1) / 2f * cs;
+        mainCamera.orthographicSize  = halfBoard + cs * 1.8f;
+        mainCamera.transform.position = new Vector3(0, 0, -10);
+    }
+
+    // ── Vong lap luot ─────────────────────────────────────────────
     IEnumerator HandleTurn()
     {
         while (true)
@@ -80,37 +115,30 @@ public class GameManager : MonoBehaviour
             if (player.type == PlayerType.Bot)
             {
                 yield return StartCoroutine(BotTurn(player.playerIndex));
+                if (CheckWinCondition()) yield break;
             }
             else
-            {
-                // Chờ input từ người chơi — HandleTurn dừng ở đây
-                // OnCellClicked() sẽ gọi ContinueTurn() khi xong
-                yield break;
-            }
-
-            if (CheckWinCondition()) yield break;
+                yield break; // cho input nguoi choi
         }
     }
 
-    // ── Bot Turn ──────────────────────────────────────────────────
-    IEnumerator BotTurn(int botIdx)
+    IEnumerator BotTurn(int idx)
     {
         isAnimating = true;
+        SetStatus($"Luot {currentState.players[idx].playerName} (Bot dang nghi...)");
         yield return new WaitForSeconds(0.4f);
 
         GameState old  = currentState;
-        GameState next = bots[botIdx]?.BestMove(currentState);
+        GameState next = bots[idx]?.BestMove(currentState);
 
         if (next != null)
         {
             currentState = next;
             yield return StartCoroutine(boardRenderer.RenderAnimated(old, currentState));
         }
-
         isAnimating = false;
     }
 
-    // Được gọi sau khi người chơi hoặc bot xong lượt
     void ContinueTurn()
     {
         if (CheckWinCondition()) return;
@@ -120,108 +148,81 @@ public class GameManager : MonoBehaviour
     // ── Player Input ──────────────────────────────────────────────
     public void OnCellClicked(Vector2Int pos)
     {
-        if (isAnimating) return;
-
+        if (isAnimating || currentState == null) return;
         var player = currentState.CurrentPlayer;
-        if (player.type != PlayerType.Human) return;  // không phải lượt người chơi
+        if (player.type != PlayerType.Human) return;
 
         int N = currentState.boardSize;
 
-        // Click ô exit: EscapeMarker trả về ngoài biên
+        // Click Exit
         if (IsEscapeClick(pos, player, N))
         {
-            if (selectedPiece.x == -1)
-            { SetStatus("Chọn quân trước!"); return; }
-
-            // Kiểm tra quân chọn có ở sát biên thoát không
+            if (selectedPiece.x == -1) { SetStatus("Chon quan truoc!"); return; }
             if (!CanEscape(selectedPiece, player, N))
-            { SetStatus("Quân phải ở sát biên để thoát!"); return; }
-
-            GameState escapeState = TryFindEscapeMove(selectedPiece, player.playerIndex);
-            if (escapeState != null) { ExecutePlayerMove(escapeState); return; }
-
-            SetStatus("Không thể thoát!");
+            { SetStatus("Quan phai o sat bien de thoat!"); return; }
+            var esc = TryFindEscapeMove(selectedPiece, player.playerIndex);
+            if (esc != null) { ExecutePlayerMove(esc); return; }
+            SetStatus("Khong the thoat!");
             return;
         }
 
-        // Chỉ xử lý ô trong bàn
         if (!DodgemRules.InBounds(pos, N)) return;
 
-        // ── Chưa chọn quân ──
         if (selectedPiece.x == -1)
         {
             if (!player.HasPieceAt(pos)) return;
-
-            var moves = DodgemRules.GetValidMovesForPiece(
-                currentState, pos, player.playerIndex);
-            if (moves.Count == 0)
-            { SetStatus("Quân này không đi được, chọn quân khác!"); return; }
-
+            var moves = DodgemRules.GetValidMovesForPiece(currentState, pos, player.playerIndex);
+            if (moves.Count == 0) { SetStatus("Quan nay khong di duoc!"); return; }
             selectedPiece = pos;
             validMoves    = moves;
-            boardRenderer.HighlightSelected(selectedPiece, validMoves,
-                player.playerIndex, currentState);
-            SetStatus($"Đã chọn ({pos.x},{pos.y}) — Click ô xanh để đi");
+            boardRenderer.HighlightSelected(selectedPiece, validMoves, player.playerIndex, currentState);
+            SetStatus($"Da chon ({pos.x},{pos.y}) — Click o xanh de di");
             return;
         }
 
-        // ── Click lại chính quân → bỏ chọn ──
         if (pos == selectedPiece)
-        {
-            Deselect();
-            SetStatus(TurnStatus(player));
-            return;
-        }
+        { Deselect(); SetStatus(TurnStatus(player)); return; }
 
-        // ── Click quân cùng phe khác → chuyển chọn ──
         if (player.HasPieceAt(pos))
         {
-            var moves = DodgemRules.GetValidMovesForPiece(
-                currentState, pos, player.playerIndex);
+            var moves = DodgemRules.GetValidMovesForPiece(currentState, pos, player.playerIndex);
             if (moves.Count > 0)
             {
                 selectedPiece = pos;
                 validMoves    = moves;
-                boardRenderer.HighlightSelected(selectedPiece, validMoves,
-                    player.playerIndex, currentState);
-                SetStatus($"Đã chọn ({pos.x},{pos.y}) — Click ô xanh để đi");
+                boardRenderer.HighlightSelected(selectedPiece, validMoves, player.playerIndex, currentState);
+                SetStatus($"Da chon ({pos.x},{pos.y})");
             }
-            else SetStatus("Quân đó không đi được!");
+            else SetStatus("Quan do khong di duoc!");
             return;
         }
 
-        // ── Click ô đích ──
-        GameState chosen = TryFindMove(selectedPiece, pos, player.playerIndex);
-        if (chosen == null)
-        { SetStatus("Không thể đi tới đó! Chọn ô xanh."); return; }
-
+        var chosen = TryFindMove(selectedPiece, pos, player.playerIndex);
+        if (chosen == null) { SetStatus("Khong the di toi do!"); return; }
         ExecutePlayerMove(chosen);
     }
 
-    // ── Tìm nước đi ───────────────────────────────────────────────
-    GameState TryFindMove(Vector2Int from, Vector2Int to, int playerIdx)
+    GameState TryFindMove(Vector2Int from, Vector2Int to, int pIdx)
     {
         foreach (var child in DodgemRules.GetChildren(currentState))
-            for (int i = 0; i < currentState.players[playerIdx].pieces.Length; i++)
-                if (currentState.players[playerIdx].pieces[i] == from &&
-                    child.players[playerIdx].pieces[i] == to)
+            for (int i = 0; i < currentState.players[pIdx].pieces.Length; i++)
+                if (currentState.players[pIdx].pieces[i] == from &&
+                    child.players[pIdx].pieces[i] == to)
                     return child;
         return null;
     }
 
-    GameState TryFindEscapeMove(Vector2Int from, int playerIdx)
+    GameState TryFindEscapeMove(Vector2Int from, int pIdx)
     {
         foreach (var child in DodgemRules.GetChildren(currentState))
-            for (int i = 0; i < currentState.players[playerIdx].pieces.Length; i++)
-                if (currentState.players[playerIdx].pieces[i] == from &&
-                    child.players[playerIdx].pieces[i].x == -1 &&
-                    child.players[playerIdx].escaped > currentState.players[playerIdx].escaped)
+            for (int i = 0; i < currentState.players[pIdx].pieces.Length; i++)
+                if (currentState.players[pIdx].pieces[i] == from &&
+                    child.players[pIdx].pieces[i].x == -1 &&
+                    child.players[pIdx].escaped > currentState.players[pIdx].escaped)
                     return child;
         return null;
     }
 
-    // ── Kiểm tra click thoát ──────────────────────────────────────
-    // Ô exit nằm ngoài bàn theo đúng hướng của phe
     bool IsEscapeClick(Vector2Int pos, PlayerData player, int N)
     {
         switch (player.escapeDir)
@@ -234,7 +235,6 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    // Quân tại 'pos' có thể thoát không (đang ở sát biên thoát)?
     bool CanEscape(Vector2Int pos, PlayerData player, int N)
     {
         switch (player.escapeDir)
@@ -247,12 +247,11 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    // ── Execute ───────────────────────────────────────────────────
     void ExecutePlayerMove(GameState next)
     {
-        isAnimating       = true;
-        GameState old     = currentState;
-        currentState      = next;
+        isAnimating   = true;
+        GameState old = currentState;
+        currentState  = next;
         Deselect();
         StartCoroutine(PlayerMoveCoroutine(old, next));
     }
@@ -264,7 +263,6 @@ public class GameManager : MonoBehaviour
         ContinueTurn();
     }
 
-    // ── Helpers ───────────────────────────────────────────────────
     void Deselect()
     {
         selectedPiece = new Vector2Int(-1, -1);
@@ -274,38 +272,27 @@ public class GameManager : MonoBehaviour
 
     bool CheckWinCondition()
     {
+        if (currentState == null) return false;
         var winner = currentState.Winner();
-        if (winner != null)
-        { SetStatus($"{winner.playerName} THANG!"); return true; }
-
-        // Phe hiện tại hết nước đi
+        if (winner != null) { SetStatus($"{winner.playerName} THANG!"); return true; }
         if (DodgemRules.GetChildren(currentState).Count == 0)
         {
-            var stuck = currentState.CurrentPlayer;
+            var stuck = currentState.CurrentPlayer.playerName;
+            SetStatus($"{stuck} het nuoc di!");
             currentState.NextTurn();
-            SetStatus($"{stuck.playerName} het nuoc di!");
-            if (!CheckWinCondition()) ContinueTurn();
-            return false;
+            ContinueTurn();
         }
         return false;
     }
 
-    string TurnStatus(PlayerData player)
-    {
-        if (player.type == PlayerType.Bot)
-            return $"Luot {player.playerName} (Bot dang nghi...)";
-        return $"Luot {player.playerName} (ban) — Click quan de chon";
-    }
+    string TurnStatus(PlayerData p)
+        => p.type == PlayerType.Bot
+           ? $"Luot {p.playerName} (Bot)..."
+           : $"Luot {p.playerName} — Click quan";
 
     void SetStatus(string msg)
     {
         if (statusText != null) statusText.text = msg;
         Debug.Log("[Dodgem] " + msg);
-    }
-
-    public void RestartGame()
-    {
-        StopAllCoroutines();
-        StartGame();
     }
 }

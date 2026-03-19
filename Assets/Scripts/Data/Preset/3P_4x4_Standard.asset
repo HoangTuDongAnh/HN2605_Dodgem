@@ -1,0 +1,39 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 988051cec51e4359af1bdc23d14434af, type: 3}
+  m_Name: 3P_4x4_Standard
+  m_EditorClassIdentifier: Assembly-CSharp::GamePreset
+  presetName: 3 Nguoi - 4x4 (3 quan)
+  description: 3 nguoi tieu chuan. 4x4, moi phe 3 quan
+  rules: 
+  boardSize: 4
+  boardMatrix:
+  - cells: 00000000020000000200000002000000
+  - cells: 01000000000000000000000003000000
+  - cells: 01000000000000000000000003000000
+  - cells: 01000000000000000000000003000000
+  playerConfigs:
+  - playerName: Trang
+    escapeDir: 0
+    type: 1
+    botDepth: 4
+    pieceColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
+  - playerName: Den
+    escapeDir: 1
+    type: 0
+    botDepth: 0
+    pieceColor: {r: 0.15, g: 0.15, b: 0.15, a: 1}
+  - playerName: Do
+    escapeDir: 2
+    type: 1
+    botDepth: 4
+    pieceColor: {r: 0.85, g: 0.2, b: 0.2, a: 1}
