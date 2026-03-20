@@ -2,11 +2,6 @@
 using UnityEngine.UI;
 using TMPro;
 
-// ================================================================
-// PlayerSlotUI — 1 hang trong menu chon Human/Bot
-// Cap nhat: them SetupFromPreset() nhan PlayerPresetConfig
-// ================================================================
-
 public class PlayerSlotUI : MonoBehaviour
 {
     [Header("UI elements — keo vao Inspector")]
@@ -18,28 +13,10 @@ public class PlayerSlotUI : MonoBehaviour
     static readonly int[]    DepthMap = { 2, 4, 6 };
     static readonly string[] Labels   = { "Easy", "Medium", "Hard" };
 
-    private int    slotIndex;
-    private bool   isSetup = false;
+    private int  slotIndex;
+    private bool isSetup = false;
 
-    // ── Setup tu GameConfig (cu) ──────────────────────────────────
-    public void Setup(int idx, string name, Color nameColor, GameConfig cfg)
-    {
-        slotIndex = idx;
-        isSetup   = true;
-
-        if (labelName != null) { labelName.text = name; labelName.color = nameColor; }
-
-        InitDropdown();
-
-        bool isHuman = (cfg.playerTypes[idx] == PlayerType.Human);
-        if (toggleHuman  != null) toggleHuman.isOn  = isHuman;
-        if (dropdownDiff != null) dropdownDiff.value = DepthToIdx(cfg.botDepths[idx]);
-
-        RefreshUI(isHuman);
-        AddListeners();
-    }
-
-    // ── Setup tu PlayerPresetConfig (moi) ────────────────────────
+    // ── Setup tu PlayerPresetConfig ───────────────────────────────
     public void SetupFromPreset(int idx, PlayerPresetConfig cfg)
     {
         slotIndex = idx;
@@ -70,7 +47,6 @@ public class PlayerSlotUI : MonoBehaviour
 
     void AddListeners()
     {
-        // Xoa listener cu truoc khi them moi (tranh duplicate)
         if (toggleHuman  != null) toggleHuman.onValueChanged.RemoveAllListeners();
         if (dropdownDiff != null) dropdownDiff.onValueChanged.RemoveAllListeners();
 
@@ -86,7 +62,6 @@ public class PlayerSlotUI : MonoBehaviour
         if (labelType    != null) labelType.text = isHuman ? "Human" : "Bot";
     }
 
-    // ── Getters ───────────────────────────────────────────────────
     public PlayerType GetPlayerType()
         => (toggleHuman != null && toggleHuman.isOn) ? PlayerType.Human : PlayerType.Bot;
 
