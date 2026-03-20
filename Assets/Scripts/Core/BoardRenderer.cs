@@ -4,53 +4,53 @@ using System.Collections.Generic;
 
 public class BoardRenderer : MonoBehaviour
 {
-    [Header("Prefabs quan co — PHAI GAN TRONG INSPECTOR")]
+    [Header("Prefabs quan co")]
     public GameObject whitePiecePrefab;
     public GameObject blackPiecePrefab;
 
     [Header("Colors")]
-    public Color selectedColor   = new Color(1f,    0.85f, 0f,   1f);
-    public Color validMoveColor  = new Color(0.3f,  0.9f,  0.3f, 1f);
-    public Color exitColor       = new Color(0.2f,  0.7f,  1f,   1f);
-    public Color normalCellColor = new Color(0.75f, 0.75f, 0.75f, 1f);
+    public Color selectedColor     = new Color(1f, 0.85f, 0f, 1f);
+    public Color validMoveColor    = new Color(0.3f, 0.9f, 0.3f, 1f);
+    public Color normalCellColor   = new Color(0.75f, 0.75f, 0.75f, 1f);
+    public Color blockedCellColor  = new Color(0.12f, 0.12f, 0.12f, 1f);
+    public Color exitCellHintColor = new Color(1f, 0.85f, 0.2f, 0.35f);
+    public Color escapeReadyColor  = new Color(1f, 0.5f, 0.1f, 0.95f);
 
     [Header("Animation")]
     public float moveSpeed = 8f;
 
     private GameObject[][]   pieceObjs;
     private SpriteRenderer[] cellSR;
-    private SpriteRenderer[] exitSRs;
-    private GameObject[]     exitCellObjs;
-    private int              currentBoardSize;
+    private int              currentWidth;
+    private int              currentHeight;
     private bool             initialized = false;
 
-    // Cache generator de tinh GridToWorld chinh xac
     private BoardGenerator cachedGen;
+    private GameState      cachedState;
 
     public void SetupFromGenerator(BoardGenerator gen, GameState state)
     {
         if (whitePiecePrefab == null)
         {
-            Debug.LogError("[BoardRenderer] whitePiecePrefab CHUA GAN! " +
-                           "Chon object Board -> BoardRenderer -> keo prefab vao.");
+            Debug.LogError("[BoardRenderer] whitePiecePrefab CHUA GAN!");
             return;
         }
 
-        initialized      = false;
-        currentBoardSize = state.boardSize;
-        cachedGen        = gen;
-        int N            = state.boardSize;
+        initialized   = false;
+        currentWidth  = state.boardWidth;
+        currentHeight = state.boardHeight;
+        cachedGen     = gen;
+        cachedState   = state;
 
-        cellSR = new SpriteRenderer[N * N];
+        int total = currentWidth * currentHeight;
+        cellSR = new SpriteRenderer[total];
+
         if (gen.Cells != null)
+        {
             for (int i = 0; i < gen.Cells.Length && i < cellSR.Length; i++)
-                if (gen.Cells[i] != null) cellSR[i] = GetSR(gen.Cells[i]);
-
-        exitCellObjs = gen.ExitCells;
-        exitSRs      = new SpriteRenderer[state.NumPlayers];
-        if (exitCellObjs != null)
-            for (int p = 0; p < state.NumPlayers && p < exitCellObjs.Length; p++)
-                if (exitCellObjs[p] != null) exitSRs[p] = GetSR(exitCellObjs[p]);
+                if (gen.Cells[i] != null)
+                    cellSR[i] = GetSR(gen.Cells[i]);
+        }
 
         SetupPieces(state, gen);
         ResetAllColors();
@@ -59,34 +59,35 @@ public class BoardRenderer : MonoBehaviour
 
     void SetupPieces(GameState state, BoardGenerator gen)
     {
-        // Destroy quan cu
         if (pieceObjs != null)
+        {
             foreach (var arr in pieceObjs)
-                if (arr != null)
-                    foreach (var go in arr)
-                        if (go != null) Destroy(go);
+            {
+                if (arr == null) continue;
+                foreach (var go in arr)
+                    if (go != null) Destroy(go);
+            }
+        }
 
         pieceObjs = new GameObject[state.NumPlayers][];
-
-        // FIX: dung gen.transform lam parent de piece la con cua Board
         Transform pieceParent = gen != null ? gen.transform : null;
 
         for (int p = 0; p < state.NumPlayers; p++)
         {
-            var player   = state.players[p];
-            int nPieces  = player.pieces.Length;
-            pieceObjs[p] = new GameObject[nPieces];
+            var player = state.players[p];
+            pieceObjs[p] = new GameObject[player.pieces.Length];
 
             GameObject basePrefab = whitePiecePrefab;
             if (p == 1 && blackPiecePrefab != null) basePrefab = blackPiecePrefab;
-            if (basePrefab == null) { Debug.LogError("[BoardRenderer] Khong co prefab!"); continue; }
-
-            for (int i = 0; i < nPieces; i++)
+            if (basePrefab == null)
             {
-                // Instantiate voi parent de khong spam root scene
-                var go = pieceParent != null
-                         ? Instantiate(basePrefab, pieceParent)
-                         : Instantiate(basePrefab);
+                Debug.LogError("[BoardRenderer] Khong co prefab!");
+                continue;
+            }
+
+            for (int i = 0; i < player.pieces.Length; i++)
+            {
+                var go = pieceParent != null ? Instantiate(basePrefab, pieceParent) : Instantiate(basePrefab);
                 go.name = $"Player{p}_Piece{i}";
                 SetColor(go, player.pieceColor);
                 pieceObjs[p][i] = go;
@@ -97,49 +98,64 @@ public class BoardRenderer : MonoBehaviour
     public void Render(GameState state)
     {
         if (!initialized) return;
-        currentBoardSize = state.boardSize;
+
+        cachedState   = state;
+        currentWidth  = state.boardWidth;
+        currentHeight = state.boardHeight;
 
         for (int p = 0; p < state.NumPlayers && p < pieceObjs.Length; p++)
         {
             if (pieceObjs[p] == null) continue;
+
             var player = state.players[p];
             for (int i = 0; i < player.pieces.Length && i < pieceObjs[p].Length; i++)
             {
                 if (pieceObjs[p][i] == null) continue;
+
                 bool active = player.pieces[i].x != -1;
                 pieceObjs[p][i].SetActive(active);
+
                 if (active)
                     pieceObjs[p][i].transform.position =
-                        GridToWorld(player.pieces[i], state.boardSize);
+                        GridToWorld(player.pieces[i], state.boardWidth, state.boardHeight);
             }
         }
+
         ResetAllColors();
+        HighlightExitCells(state.CurrentPlayer, state);
     }
 
     public IEnumerator RenderAnimated(GameState oldState, GameState newState)
     {
         if (!initialized) yield break;
+
+        cachedState = newState;
         ResetAllColors();
+
         var anims = new List<Coroutine>();
-        int N = newState.boardSize;
 
         for (int p = 0; p < newState.NumPlayers && p < pieceObjs.Length; p++)
         {
             if (pieceObjs[p] == null) continue;
+
             var oldP = oldState.players[p];
             var newP = newState.players[p];
 
             for (int i = 0; i < oldP.pieces.Length && i < pieceObjs[p].Length; i++)
             {
                 if (pieceObjs[p][i] == null) continue;
+
                 bool was = oldP.pieces[i].x != -1;
                 bool now = newP.pieces[i].x != -1;
 
                 if (was && now && oldP.pieces[i] != newP.pieces[i])
-                    anims.Add(StartCoroutine(Slide(pieceObjs[p][i], GridToWorld(newP.pieces[i], N))));
+                {
+                    anims.Add(StartCoroutine(
+                        Slide(pieceObjs[p][i], GridToWorld(newP.pieces[i], newState.boardWidth, newState.boardHeight))));
+                }
                 else if (was && !now)
                 {
-                    Vector3 ex = GridToWorld(oldP.pieces[i], N) + ExitOffset(newP.escapeDir, N);
+                    Vector3 ex = GridToWorld(oldP.pieces[i], newState.boardWidth, newState.boardHeight) + ExitOffset(newP.escapeDir);
                     anims.Add(StartCoroutine(SlideAndHide(pieceObjs[p][i], ex)));
                 }
             }
@@ -152,65 +168,86 @@ public class BoardRenderer : MonoBehaviour
     public void HighlightSelected(Vector2Int selected, List<Vector2Int> validMoves,
                                   int playerIdx, GameState state)
     {
+        cachedState = state;
         ResetAllColors();
-        int N = state.boardSize;
+        HighlightExitCells(state.players[playerIdx], state);
 
-        int si = BoardIndex(selected, N);
+        int si = BoardIndex(selected, state.boardWidth);
         if (si >= 0 && si < cellSR.Length && cellSR[si] != null)
             cellSR[si].color = selectedColor;
 
-        bool hasEscape = false;
         foreach (var mv in validMoves)
         {
-            if (!DodgemRules.InBounds(mv, N)) { hasEscape = true; continue; }
-            int idx = BoardIndex(mv, N);
+            if (!DodgemRules.InBounds(mv, state)) continue;
+
+            int idx = BoardIndex(mv, state.boardWidth);
             if (idx >= 0 && idx < cellSR.Length && cellSR[idx] != null)
                 cellSR[idx].color = validMoveColor;
         }
 
-        if (hasEscape && exitCellObjs != null &&
-            playerIdx < exitCellObjs.Length && exitCellObjs[playerIdx] != null)
+        if (state.players[playerIdx].CanEscapeFrom(selected))
         {
-            exitCellObjs[playerIdx].SetActive(true);
-            if (playerIdx < exitSRs.Length && exitSRs[playerIdx] != null)
-                exitSRs[playerIdx].color = exitColor;
+            if (si >= 0 && si < cellSR.Length && cellSR[si] != null)
+                cellSR[si].color = escapeReadyColor;
+        }
+    }
+
+    public void HighlightExitCells(PlayerData player, GameState state)
+    {
+        if (player == null || player.exitCells == null) return;
+
+        foreach (var cell in player.exitCells)
+        {
+            if (!DodgemRules.InBounds(cell, state)) continue;
+            if (!state.IsCellPlayable(cell)) continue;
+
+            int idx = BoardIndex(cell, state.boardWidth);
+            if (idx >= 0 && idx < cellSR.Length && cellSR[idx] != null)
+                cellSR[idx].color = Color.Lerp(cellSR[idx].color, exitCellHintColor, exitCellHintColor.a);
         }
     }
 
     public void ResetAllColors()
     {
-        // An exit cells truoc
-        if (exitCellObjs != null)
-            foreach (var go in exitCellObjs)
-                if (go != null) go.SetActive(false);
+        if (cellSR == null) return;
 
-        if (cellSR != null)
-            foreach (var sr in cellSR)
-                if (sr != null) sr.color = normalCellColor;
+        for (int i = 0; i < cellSR.Length; i++)
+        {
+            if (cellSR[i] == null) continue;
+
+            int x = i % currentWidth;
+            int y = i / currentWidth;
+            var pos = new Vector2Int(x, y);
+
+            bool playable = true;
+            if (cachedState != null)
+                playable = cachedState.IsCellPlayable(pos);
+
+            cellSR[i].color = playable ? normalCellColor : blockedCellColor;
+        }
     }
 
-    // FIX: Dung cachedGen.GridToWorld de tinh dung world position
-    public Vector3 GridToWorld(Vector2Int grid, int boardSize)
+    public Vector3 GridToWorld(Vector2Int grid, int width, int height)
     {
         if (cachedGen != null)
-            return cachedGen.GridToWorld(grid, boardSize);
+            return cachedGen.GridToWorld(grid, width, height);
 
-        // Fallback neu khong co generator
-        float cs     = 2f;
-        float offset = (boardSize - 1) / 2f * cs;
-        return new Vector3(grid.x * cs - offset, grid.y * cs - offset, 0f);
+        float offsetX = (width - 1) * 0.5f * 2f;
+        float offsetY = (height - 1) * 0.5f * 2f;
+        return new Vector3(grid.x * 2f - offsetX, grid.y * 2f - offsetY, 0f);
     }
 
-    public int BoardIndex(Vector2Int pos, int boardSize)
+    public int BoardIndex(Vector2Int pos, int width)
     {
-        if (pos.x < 0 || pos.x >= boardSize || pos.y < 0 || pos.y >= boardSize) return -1;
-        return pos.y * boardSize + pos.x;
+        if (pos.x < 0 || pos.x >= currentWidth || pos.y < 0 || pos.y >= currentHeight) return -1;
+        return pos.y * width + pos.x;
     }
 
-    Vector3 ExitOffset(EscapeDirection dir, int boardSize)
+    Vector3 ExitOffset(EscapeDirection dir)
     {
         float cs = cachedGen != null ? cachedGen.cellSize : 2f;
         float d  = cs * 1.5f;
+
         switch (dir)
         {
             case EscapeDirection.Right:  return new Vector3( d,  0, 0);
@@ -231,8 +268,7 @@ public class BoardRenderer : MonoBehaviour
     {
         var sr = GetSR(go);
         if (sr != null) sr.color = c;
-        else Debug.LogWarning($"[BoardRenderer] {go.name} khong co SpriteRenderer. " +
-                               "Doi Material sang Sprites/Default.");
+        else Debug.LogWarning($"[BoardRenderer] {go.name} khong co SpriteRenderer.");
     }
 
     IEnumerator Slide(GameObject piece, Vector3 target)

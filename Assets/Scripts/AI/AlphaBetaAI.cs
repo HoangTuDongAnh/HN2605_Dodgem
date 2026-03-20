@@ -1,105 +1,194 @@
 ﻿using System.Collections.Generic;
+using UnityEngine;
 
 // ================================================================
-// AlphaBetaAI — Paranoid Alpha-Beta cho N người chơi
-//
-// Paranoid: Bot coi TẤT CẢ phe khác là đối thủ (minimizer).
-//   - Lượt của mình (myIdx) → MAX node
-//   - Lượt của bất kỳ phe nào khác → MIN node
-//
-// Mỗi bot được tạo với myPlayerIndex riêng → mỗi bot tự maximize
-// điểm của chính mình, không phải của Trắng.
-//
-// Với 2 người: Paranoid = Minimax chuẩn.
-// Với N > 2:   Paranoid là approximation hợp lý, dễ implement và
-//               đã được chứng minh chơi tốt trong thực tế.
+// AlphaBetaAI - Giai doan 5
+// - Trien khai IGameAI
+// - Paranoid alpha-beta cho nhieu nguoi choi
+// - Move ordering uu tien:
+//   1) thang ngay
+//   2) thoat ngay
+//   3) lam doi thu rat it / het nuoc
+//   4) block tot
+//   5) toi EvalFunction
 // ================================================================
-
-public class AlphaBetaAI
+public class AlphaBetaAI : IGameAI
 {
     private readonly int maxDepth;
-    private readonly int myIdx;   // index cua phe ma bot nay dai dien
+    private readonly int myPlayerIndex;
 
-    // myPlayerIndex: bot nay dang choi phe nao (0=Trang, 1=Den, ...)
-    public AlphaBetaAI(int depth = 6, int myPlayerIndex = 0)
+    const int WIN_SCORE = 1000000;
+
+    public string DisplayName => "Alpha-Beta";
+
+    public AlphaBetaAI(int depth, int myPlayerIndex)
     {
-        maxDepth = depth;
-        myIdx    = myPlayerIndex;
+        this.maxDepth = Mathf.Max(1, depth);
+        this.myPlayerIndex = myPlayerIndex;
     }
 
-    // ── BestMove: entry point ─────────────────────────────────────
     public GameState BestMove(GameState state)
     {
+        if (state == null) return null;
+
         var children = DodgemRules.GetChildren(state);
-        if (children.Count == 0) return null;
-        if (children.Count == 1) return children[0];
+        if (children == null || children.Count == 0) return null;
 
-        int alpha     = int.MinValue + 1;
-        int beta      = int.MaxValue - 1;
-        GameState best = null;
+        OrderMoves(children);
 
-        // Move ordering: uu tien nuoc di co eval cao (cai thien pruning)
-        children.Sort((a, b) =>
-            EvalFunction.Eval(b, myIdx).CompareTo(EvalFunction.Eval(a, myIdx)));
+        GameState bestChild = null;
+        int bestScore = int.MinValue;
+
+        int alpha = int.MinValue + 1;
+        int beta  = int.MaxValue - 1;
 
         foreach (var child in children)
         {
-            int val = Negamax(child, maxDepth - 1, alpha, beta);
-            if (val > alpha)
+            int score = Search(child, maxDepth - 1, alpha, beta);
+
+            if (score > bestScore || bestChild == null)
             {
-                alpha = val;
-                best  = child;
+                bestScore = score;
+                bestChild = child;
             }
+
+            if (score > alpha)
+                alpha = score;
         }
 
-        return best ?? children[0];
+        return bestChild;
     }
 
-    // ── Paranoid Negamax voi Alpha-Beta ───────────────────────────
-    // Neu den luot cua myIdx → maximize
-    // Neu den luot cua bat ky phe nao khac → minimize
-    int Negamax(GameState state, int depth, int alpha, int beta)
+    int Search(GameState state, int depth, int alpha, int beta)
     {
-        if (depth == 0 || state.IsTerminal())
-            return EvalFunction.Eval(state, myIdx);
+        if (depth <= 0 || state.IsTerminal())
+            return EvalFunction.Eval(state, myPlayerIndex);
 
         var children = DodgemRules.GetChildren(state);
-        if (children.Count == 0)
-            return EvalFunction.Eval(state, myIdx);
+        if (children == null || children.Count == 0)
+            return EvalFunction.Eval(state, myPlayerIndex);
 
-        bool isMyTurn = (state.currentPlayerIndex == myIdx);
+        OrderMoves(children);
+
+        bool isMyTurn = state.currentPlayerIndex == myPlayerIndex;
 
         if (isMyTurn)
         {
-            // MAX node
-            children.Sort((a, b) =>
-                EvalFunction.Eval(b, myIdx).CompareTo(EvalFunction.Eval(a, myIdx)));
+            int best = int.MinValue;
 
-            int best = int.MinValue + 1;
             foreach (var child in children)
             {
-                int val = Negamax(child, depth - 1, alpha, beta);
-                if (val > best) best = val;
-                if (val > alpha) alpha = val;
-                if (alpha >= beta) break; // beta cutoff
+                int score = Search(child, depth - 1, alpha, beta);
+                if (score > best) best = score;
+                if (score > alpha) alpha = score;
+                if (beta <= alpha) break;
             }
+
             return best;
         }
         else
         {
-            // MIN node (bat ky doi thu nao)
-            children.Sort((a, b) =>
-                EvalFunction.Eval(a, myIdx).CompareTo(EvalFunction.Eval(b, myIdx)));
+            int best = int.MaxValue;
 
-            int best = int.MaxValue - 1;
             foreach (var child in children)
             {
-                int val = Negamax(child, depth - 1, alpha, beta);
-                if (val < best) best = val;
-                if (val < beta) beta = val;
-                if (alpha >= beta) break; // alpha cutoff
+                int score = Search(child, depth - 1, alpha, beta);
+                if (score < best) best = score;
+                if (score < beta) beta = score;
+                if (beta <= alpha) break;
             }
+
             return best;
         }
+    }
+
+    void OrderMoves(List<GameState> children)
+    {
+        children.Sort((a, b) =>
+        {
+            int sa = QuickMoveScore(a);
+            int sb = QuickMoveScore(b);
+            return sb.CompareTo(sa);
+        });
+    }
+
+    int QuickMoveScore(GameState state)
+    {
+        var winner = state.Winner();
+        if (winner != null)
+        {
+            if (winner.playerIndex == myPlayerIndex) return WIN_SCORE;
+            return -WIN_SCORE;
+        }
+
+        int score = 0;
+
+        // 1) Uu tien nuoc lam minh thoat them quan
+        score += state.players[myPlayerIndex].escaped * 20000;
+
+        // 2) Danh gia mobility doi thu
+        int oppMobility = 0;
+        int trappedOpps = 0;
+
+        var tmp = state.Clone();
+        for (int i = 0; i < state.NumPlayers; i++)
+        {
+            if (i == myPlayerIndex) continue;
+
+            tmp.currentPlayerIndex = i;
+            int moves = DodgemRules.GetChildren(tmp).Count;
+
+            oppMobility += moves;
+            if (moves == 0) trappedOpps++;
+            else if (moves == 1) score += 500;
+        }
+
+        score += trappedOpps * 4000;
+        score -= oppMobility * 10;
+
+        // 3) Uu tien neu minh con nhieu lua chon
+        tmp.currentPlayerIndex = myPlayerIndex;
+        int myMobility = DodgemRules.GetChildren(tmp).Count;
+        score += myMobility * 12;
+
+        // 4) Block pressure
+        score += BlockPressureScore(state, myPlayerIndex);
+
+        // 5) Eval tong quan
+        score += EvalFunction.Eval(state, myPlayerIndex);
+
+        return score;
+    }
+
+    int BlockPressureScore(GameState state, int perspectiveIdx)
+    {
+        int score = 0;
+        var me = state.players[perspectiveIdx];
+
+        for (int oppIdx = 0; oppIdx < state.NumPlayers; oppIdx++)
+        {
+            if (oppIdx == perspectiveIdx) continue;
+            var opp = state.players[oppIdx];
+
+            foreach (var oppPos in opp.pieces)
+            {
+                if (oppPos.x == -1) continue;
+                if (!state.IsCellPlayable(oppPos)) continue;
+
+                Vector2Int fwd = opp.ForwardDir();
+                Vector2Int front1 = oppPos + fwd;
+                Vector2Int front2 = oppPos + fwd + fwd;
+
+                foreach (var myPos in me.pieces)
+                {
+                    if (myPos.x == -1) continue;
+
+                    if (myPos == front1) score += 220;
+                    else if (myPos == front2) score += 90;
+                }
+            }
+        }
+
+        return score;
     }
 }

@@ -1264,8 +1264,10 @@ MonoBehaviour:
   blackPiecePrefab: {fileID: 6946983189480026998, guid: c466423de9890754898f2dc8074bc4b3, type: 3}
   selectedColor: {r: 1, g: 0.85, b: 0, a: 1}
   validMoveColor: {r: 0.3, g: 0.9, b: 0.3, a: 1}
-  exitColor: {r: 0.2, g: 0.7, b: 1, a: 1}
   normalCellColor: {r: 0.75, g: 0.75, b: 0.75, a: 1}
+  blockedCellColor: {r: 0.12, g: 0.12, b: 0.12, a: 1}
+  exitCellHintColor: {r: 1, g: 0.85, b: 0.2, a: 0.35}
+  escapeReadyColor: {r: 1, g: 0.5, b: 0.1, a: 0.95}
   moveSpeed: 8
 --- !u!4 &308396765
 Transform:
@@ -1295,9 +1297,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BoardGenerator
   cellPrefab: {fileID: 5414184599558919913, guid: 4e3bd930cb4e4df4cbbed3169170dcb2, type: 3}
-  exitCellPrefab: {fileID: 5414184599558919913, guid: 58be75e9e7e855340a4e6e406ee0032a, type: 3}
   cellSize: 2
-  exitThickness: 2
 --- !u!1 &312729423
 GameObject:
   m_ObjectHideFlags: 0
@@ -8382,18 +8382,6 @@ MonoBehaviour:
   gamePanel: {fileID: 366417830}
   presets:
   - {fileID: 11400000, guid: 394ae30fd1584a54b9549cbb5f7a1082, type: 2}
-  - {fileID: 11400000, guid: 3888758be1ec9664cbd665e2bc70c0ed, type: 2}
-  - {fileID: 11400000, guid: 488ed76da5da7424bb16523bab8868da, type: 2}
-  - {fileID: 11400000, guid: cee380d82c5b2354a8b2b3be4a6d75c0, type: 2}
-  - {fileID: 11400000, guid: 9e53f3d13b073274fbac728718d71f95, type: 2}
-  - {fileID: 11400000, guid: fc7f70b9bdf2eb045a5db69215a38ec6, type: 2}
-  - {fileID: 11400000, guid: 1e49dc577c0c4da4ebca73e525e6f2db, type: 2}
-  - {fileID: 11400000, guid: 9f8e5ee80a3ce2f44a3eeba8d960bacf, type: 2}
-  - {fileID: 11400000, guid: 992af3261acb6734785e103f02664cbe, type: 2}
-  - {fileID: 11400000, guid: 0eef144fc08a71d4b9d8d77382b51d8e, type: 2}
-  - {fileID: 11400000, guid: a9b5e83d7fbf0bc41ac639f001490075, type: 2}
-  - {fileID: 11400000, guid: 647d92c485abf4e42b4bfefa0e872185, type: 2}
-  - {fileID: 11400000, guid: 72bcff6e4029d494d9c30850ffdce12c, type: 2}
   presetContainer: {fileID: 1328443569}
   presetCardPrefab: {fileID: 6586993718281203170, guid: 565f6e628d7936443860659c1878572b, type: 3}
   scrollViewRect: {fileID: 2062635465}

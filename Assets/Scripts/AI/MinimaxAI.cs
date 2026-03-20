@@ -1,62 +1,78 @@
-﻿public class MinimaxAI
+﻿using System.Collections.Generic;
+using UnityEngine;
+
+// ================================================================
+// MinimaxAI - dung cho muc Easy
+// - Ho tro nhieu nguoi choi theo huong paranoid minimax
+// - Dung EvalFunction.Eval(..., myPlayerIndex)
+// - Chu y: khong cat tia alpha-beta, co y de giu muc de
+// ================================================================
+public class MinimaxAI : IGameAI
 {
-    private int maxDepth;
+    private readonly int maxDepth;
+    private readonly int myPlayerIndex;
 
-    public MinimaxAI(int depth = 4) { maxDepth = depth; }
+    public string DisplayName => "Minimax";
 
-    // MaxVal(u, h) - Hàm đệ quy cho đỉnh Trắng (MAX)
-    public int MaxVal(GameState state, int h)
+    public MinimaxAI(int depth, int myPlayerIndex)
     {
-        // Điều kiện dừng: đỉnh lá hoặc đỉnh kết thúc
-        if (h == 0 || state.IsTerminal())
-            return EvalFunction.Eval(state);
-
-        int maxScore = int.MinValue;
-        var children = DodgemRules.GetChildren(state);
-
-        if (children.Count == 0)        // Không có nước đi
-            return EvalFunction.Eval(state);
-
-        foreach (var child in children)
-            maxScore = System.Math.Max(maxScore, MinVal(child, h - 1));
-
-        return maxScore;
+        this.maxDepth = Mathf.Max(1, depth);
+        this.myPlayerIndex = myPlayerIndex;
     }
 
-    // MinVal(u, h) - Hàm đệ quy cho đỉnh Đen (MIN)
-    public int MinVal(GameState state, int h)
-    {
-        if (h == 0 || state.IsTerminal())
-            return EvalFunction.Eval(state);
-
-        int minScore = int.MaxValue;
-        var children = DodgemRules.GetChildren(state);
-
-        if (children.Count == 0)
-            return EvalFunction.Eval(state);
-
-        foreach (var child in children)
-            minScore = System.Math.Min(minScore, MaxVal(child, h - 1));
-
-        return minScore;
-    }
-
-    // Minimax(u, v) - Chọn nước đi tốt nhất cho Trắng
     public GameState BestMove(GameState state)
     {
-        int bestVal = int.MinValue;
-        GameState bestState = null;
+        if (state == null) return null;
+
         var children = DodgemRules.GetChildren(state);
+        if (children == null || children.Count == 0) return null;
+
+        GameState bestState = null;
+        int bestVal = int.MinValue;
 
         foreach (var child in children)
         {
-            int val = MinVal(child, maxDepth - 1);
-            if (val >= bestVal)
+            int val = Search(child, maxDepth - 1);
+            if (bestState == null || val > bestVal)
             {
-                bestVal  = val;
+                bestVal = val;
                 bestState = child;
             }
         }
+
         return bestState;
+    }
+
+    int Search(GameState state, int depth)
+    {
+        if (depth <= 0 || state.IsTerminal())
+            return EvalFunction.Eval(state, myPlayerIndex);
+
+        var children = DodgemRules.GetChildren(state);
+        if (children == null || children.Count == 0)
+            return EvalFunction.Eval(state, myPlayerIndex);
+
+        bool isMyTurn = state.currentPlayerIndex == myPlayerIndex;
+
+        if (isMyTurn)
+        {
+            int best = int.MinValue;
+            foreach (var child in children)
+            {
+                int score = Search(child, depth - 1);
+                if (score > best) best = score;
+            }
+            return best;
+        }
+        else
+        {
+            int best = int.MaxValue;
+            foreach (var child in children)
+            {
+                int score = Search(child, depth - 1);
+                if (score < best) best = score;
+            }
+            return best;
+        }
     }
 }

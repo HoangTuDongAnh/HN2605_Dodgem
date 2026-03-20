@@ -1,149 +1,280 @@
 ﻿using UnityEngine;
-
-// ================================================================
-// EvalFunction — hàm đánh giá trạng thái cho AI
-//
-// THAY ĐỔI SO VỚI BẢN CŨ:
-//   - Bỏ bảng điểm cố định {0,5,10} → tính theo tỉ lệ boardSize
-//   - Bỏ hardcode boardSize=3 trong BlockingScore
-//   - Thêm Eval(state, playerIdx) cho Paranoid AI sau này
-//   - Eval(state) không tham số vẫn hoạt động (backward-compat)
-//
-// Quy ước điểm: dương = tốt cho players[0] (Trắng/AI)
-// ================================================================
+using System.Collections.Generic;
 
 public static class EvalFunction
 {
-    // ── Eval không tham số — backward-compat cho AlphaBetaAI ─────
-    // Luôn đánh giá từ góc nhìn của players[0] (Trắng)
+    const int WIN_SCORE = 100000;
+
+    // Trong so tong quat
+    const int ESCAPED_PIECE_SCORE       = 2200;
+    const int READY_TO_ESCAPE_SCORE     = 380;
+    const int REACHABLE_EXIT_BONUS_BASE = 260;
+    const int UNREACHABLE_PENALTY       = 180;
+    const int MOBILITY_WEIGHT_SELF      = 14;
+    const int MOBILITY_WEIGHT_OPP       = 9;
+    const int BLOCK_DIRECT_SCORE        = 90;
+    const int BLOCK_NEAR_SCORE          = 45;
+    const int TRAP_BONUS                = 160;
+    const int ENDGAME_ESCAPED_BONUS     = 300;
+    const int ENDGAME_READY_BONUS       = 180;
+
     public static int Eval(GameState state)
     {
-        return Eval(state, perspectivePlayerIdx: 0);
+        return Eval(state, 0);
     }
 
-    // ── Eval có tham số — dùng cho Paranoid AI (Giai đoạn 3) ─────
-    // perspectivePlayerIdx: phe nào muốn maximize điểm
     public static int Eval(GameState state, int perspectivePlayerIdx)
     {
-        int N = state.boardSize;
-
-        // Kiểm tra kết thúc
         var winner = state.Winner();
         if (winner != null)
-            return winner.playerIndex == perspectivePlayerIdx ? 20000 : -20000;
+            return winner.playerIndex == perspectivePlayerIdx ? WIN_SCORE : -WIN_SCORE;
 
         int score = 0;
 
         for (int i = 0; i < state.NumPlayers; i++)
         {
-            var player  = state.players[i];
-            int sign    = (i == perspectivePlayerIdx) ? 1 : -1;
-            int pScore  = ScoreForPlayer(player, N);
-            score      += sign * pScore;
+            int sign = (i == perspectivePlayerIdx) ? 1 : -1;
+            score += sign * ScoreForPlayer(state, i);
         }
 
-        // Thưởng thêm: phe hiện tại có nhiều nước đi hơn thì tốt hơn
-        score += MobilityBonus(state, perspectivePlayerIdx);
+        score += BlockingScore(state, perspectivePlayerIdx);
+        score += MobilityScore(state, perspectivePlayerIdx);
+        score += TrapScore(state, perspectivePlayerIdx);
+        score += TurnAdvantageScore(state, perspectivePlayerIdx);
 
         return score;
     }
 
-    // ── Điểm của một phe ─────────────────────────────────────────
-    static int ScoreForPlayer(PlayerData player, int boardSize)
+    static int ScoreForPlayer(GameState state, int playerIdx)
     {
+        var player = state.players[playerIdx];
         int score = 0;
-        int N     = boardSize;
 
-        // Thưởng lớn mỗi quân đã thoát
-        score += player.escaped * 500;
+        // 1) Thuong so quan da thoat
+        score += player.escaped * ESCAPED_PIECE_SCORE;
 
-        // Điểm tiến gần đích — phi tuyến, gần cuối thưởng nhiều hơn
+        int activePieces = 0;
+        int readyToEscape = 0;
+        int reachablePieces = 0;
+        int totalDist = 0;
+
         foreach (var pos in player.pieces)
         {
             if (pos.x == -1) continue;
+            if (!state.IsCellPlayable(pos)) continue;
 
-            // Khoảng cách đến đích (0 = ngay trước cửa thoát)
-            int distToEscape = DistanceToEscape(pos, player.escapeDir, N);
-            int maxDist      = N - 1;
+            activePieces++;
 
-            // Điểm phi tuyến: càng gần đích điểm càng cao
-            // dist=N-1 → 0, dist=1 → 50, dist=0 → 100
-            int posScore = (int)(100f * (1f - (float)distToEscape / maxDist));
-            score += posScore;
+            if (player.CanEscapeFrom(pos))
+            {
+                readyToEscape++;
+                score += READY_TO_ESCAPE_SCORE;
+            }
+
+            int dist = DistanceToNearestExit(state, player, pos);
+            if (dist >= 9999)
+            {
+                score -= UNREACHABLE_PENALTY;
+                continue;
+            }
+
+            reachablePieces++;
+            totalDist += dist;
+
+            // Cang gan exit cang duoc thuong
+            // dist=0 => diem cao nhat
+            score += Mathf.Max(0, REACHABLE_EXIT_BONUS_BASE - dist * 42);
+
+            // Thuong them neu gan thoat that su
+            if (dist == 0) score += 120;
+            else if (dist == 1) score += 80;
+            else if (dist == 2) score += 35;
         }
+
+        // 2) Thuong neu nhieu quan con co duong den exit
+        score += reachablePieces * 55;
+
+        // 3) Phat neu quan con lai nhieu ma chua tiep can duoc lo thoat
+        if (activePieces > 0 && reachablePieces < activePieces)
+            score -= (activePieces - reachablePieces) * 70;
+
+        // 4) Endgame: khi it quan, uu tien thoat nhanh hon
+        if (activePieces <= 2)
+        {
+            score += player.escaped * ENDGAME_ESCAPED_BONUS;
+            score += readyToEscape * ENDGAME_READY_BONUS;
+        }
+
+        // 5) Thuong nhe neu tong khoang cach nho
+        if (reachablePieces > 0)
+            score += Mathf.Max(0, 140 - totalDist * 10);
 
         return score;
     }
 
-    // ── Khoảng cách đến ô thoát ───────────────────────────────────
-    static int DistanceToEscape(Vector2Int pos, EscapeDirection dir, int boardSize)
+    static int MobilityScore(GameState state, int perspectiveIdx)
     {
-        int N = boardSize;
-        switch (dir)
+        var tmp = state.Clone();
+
+        tmp.currentPlayerIndex = perspectiveIdx;
+        int myMoves = DodgemRules.GetChildren(tmp).Count;
+
+        if (myMoves == 0) return -2500;
+
+        int oppMoves = 0;
+        int trappedOpponents = 0;
+
+        for (int i = 0; i < state.NumPlayers; i++)
         {
-            case EscapeDirection.Right:  return (N - 1) - pos.x;  // cần đi thêm bao nhiêu ô sang phải
-            case EscapeDirection.Top:    return (N - 1) - pos.y;
-            case EscapeDirection.Left:   return pos.x;             // cần đi thêm bao nhiêu ô sang trái
-            case EscapeDirection.Bottom: return pos.y;
-            default: return N;
+            if (i == perspectiveIdx) continue;
+
+            tmp.currentPlayerIndex = i;
+            int c = DodgemRules.GetChildren(tmp).Count;
+            oppMoves += c;
+            if (c == 0) trappedOpponents++;
         }
+
+        int score = 0;
+        score += myMoves * MOBILITY_WEIGHT_SELF;
+        score -= oppMoves * MOBILITY_WEIGHT_OPP;
+        score += trappedOpponents * 220;
+
+        return score;
     }
 
-    // ── Điểm cản ─────────────────────────────────────────────────
-    // Kiểm tra quân của phe perspective có đang cản quân đối thủ không
     static int BlockingScore(GameState state, int perspectiveIdx)
     {
         int score = 0;
-        int N     = state.boardSize;
-        var me    = state.players[perspectiveIdx];
+        var me = state.players[perspectiveIdx];
 
         for (int oppIdx = 0; oppIdx < state.NumPlayers; oppIdx++)
         {
             if (oppIdx == perspectiveIdx) continue;
             var opp = state.players[oppIdx];
 
-            foreach (var myPos in me.pieces)
+            foreach (var oppPos in opp.pieces)
             {
-                if (myPos.x == -1) continue;
-                foreach (var oppPos in opp.pieces)
+                if (oppPos.x == -1) continue;
+                if (!state.IsCellPlayable(oppPos)) continue;
+
+                Vector2Int oppFwd = opp.ForwardDir();
+                Vector2Int front1 = oppPos + oppFwd;
+                Vector2Int front2 = oppPos + oppFwd + oppFwd;
+
+                foreach (var myPos in me.pieces)
                 {
-                    if (oppPos.x == -1) continue;
+                    if (myPos.x == -1) continue;
 
-                    // Quân của tôi đứng ngay trên đường tiến của đối thủ
-                    // → kiểm tra myPos có nằm phía trước oppPos theo hướng đi của đối thủ
-                    var oppFwd = opp.ForwardDir();
-
-                    // Cản trực tiếp: myPos = oppPos + oppFwd
-                    if (myPos == oppPos + oppFwd)
-                        score += 60;
-                    // Cản gián tiếp: myPos = oppPos + 2*oppFwd
-                    else if (myPos == oppPos + oppFwd + oppFwd)
-                        score += 30;
+                    if (myPos == front1)
+                        score += BLOCK_DIRECT_SCORE;
+                    else if (myPos == front2)
+                        score += BLOCK_NEAR_SCORE;
                 }
+
+                // Thuong them neu o truoc mat doi thu la o hop le nhung dang bi chan
+                if (DodgemRules.InBounds(front1, state) && state.IsCellPlayable(front1) && state.IsOccupied(front1))
+                    score += 24;
             }
         }
+
         return score;
     }
 
-    // ── Mobility bonus ────────────────────────────────────────────
-    // Thưởng nếu phe perspective có nhiều nước đi hơn đối thủ
-    static int MobilityBonus(GameState state, int perspectiveIdx)
+    static int TrapScore(GameState state, int perspectiveIdx)
     {
+        int score = 0;
         var tmp = state.Clone();
-        tmp.currentPlayerIndex = perspectiveIdx;
-        int myMoves = DodgemRules.GetChildren(tmp).Count;
 
-        if (myMoves == 0) return -800;   // hết nước đi rất xấu
-
-        int oppMoves = 0;
         for (int i = 0; i < state.NumPlayers; i++)
         {
-            if (i == perspectiveIdx) continue;
             tmp.currentPlayerIndex = i;
-            oppMoves += DodgemRules.GetChildren(tmp).Count;
+            int moves = DodgemRules.GetChildren(tmp).Count;
+
+            if (i == perspectiveIdx)
+            {
+                if (moves <= 1) score -= TRAP_BONUS;
+            }
+            else
+            {
+                if (moves <= 1) score += TRAP_BONUS;
+            }
         }
-        if (oppMoves == 0) return 400;   // đối thủ hết nước đi tốt
+
+        return score;
+    }
+
+    static int TurnAdvantageScore(GameState state, int perspectiveIdx)
+    {
+        // Thuong nhe neu dang la luot cua minh va minh co nuoc thoat ngay
+        if (state.currentPlayerIndex != perspectiveIdx)
+            return 0;
+
+        var me = state.players[perspectiveIdx];
+        foreach (var pos in me.pieces)
+        {
+            if (pos.x == -1) continue;
+            if (me.CanEscapeFrom(pos))
+                return 90;
+        }
 
         return 0;
+    }
+
+    static int DistanceToNearestExit(GameState state, PlayerData player, Vector2Int start)
+    {
+        if (player.exitCells == null || player.exitCells.Length == 0) return 9999;
+        if (!state.IsCellPlayable(start)) return 9999;
+
+        var exitSet = new HashSet<Vector2Int>();
+        foreach (var e in player.exitCells)
+        {
+            if (state.IsCellPlayable(e))
+                exitSet.Add(e);
+        }
+
+        if (exitSet.Count == 0) return 9999;
+        if (exitSet.Contains(start)) return 0;
+
+        var visited = new bool[state.boardWidth, state.boardHeight];
+        var q = new Queue<Node>();
+
+        visited[start.x, start.y] = true;
+        q.Enqueue(new Node(start, 0));
+
+        Vector2Int[] dirs = player.ValidDirs();
+
+        while (q.Count > 0)
+        {
+            var cur = q.Dequeue();
+
+            foreach (var dir in dirs)
+            {
+                Vector2Int next = cur.pos + dir;
+
+                if (!DodgemRules.InBounds(next, state)) continue;
+                if (!state.IsCellPlayable(next)) continue;
+                if (visited[next.x, next.y]) continue;
+
+                if (exitSet.Contains(next))
+                    return cur.dist + 1;
+
+                visited[next.x, next.y] = true;
+                q.Enqueue(new Node(next, cur.dist + 1));
+            }
+        }
+
+        return 9999;
+    }
+
+    struct Node
+    {
+        public Vector2Int pos;
+        public int dist;
+
+        public Node(Vector2Int pos, int dist)
+        {
+            this.pos = pos;
+            this.dist = dist;
+        }
     }
 }
