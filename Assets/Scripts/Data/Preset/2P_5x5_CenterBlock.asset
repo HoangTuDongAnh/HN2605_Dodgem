@@ -10,43 +10,45 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 988051cec51e4359af1bdc23d14434af, type: 3}
-  m_Name: 2P_3x3_Classic
+  m_Name: 2P_5x5_CenterBlock
   m_EditorClassIdentifier: Assembly-CSharp::GamePreset
-  presetName: 2P_3x3_Classic
-  description: Classic compact match
+  presetName: 2P_5x5_CenterBlock
+  description: Classic duel with a blocked center lane
   rules: 
-  boardWidth: 3
-  boardHeight: 3
+  boardWidth: 5
+  boardHeight: 5
   boardMatrix:
-  - cells: 000000000200000002000000
-  - cells: 010000000000000000000000
-  - cells: 010000000000000000000000
+  - cells: 0000000002000000020000000200000002000000
+  - cells: 0100000000000000000000000000000000000000
+  - cells: 0100000000000000000000000000000000000000
+  - cells: 0100000000000000000000000000000000000000
+  - cells: 0100000000000000000000000000000000000000
   validMatrix:
-  - cells: 010101
-  - cells: 010101
-  - cells: 010101
+  - cells: 0101010101
+  - cells: 0101010101
+  - cells: 0101000101
+  - cells: 0101010101
+  - cells: 0101010101
   playerConfigs:
   - playerName: White
     escapeDir: 0
-    type: 1
+    type: 0
     botDepth: 6
     pieceColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
     exitCells:
+    - {x: 4, y: 4}
     - {x: 4, y: 3}
     - {x: 4, y: 2}
     - {x: 4, y: 1}
-    - {x: 2, y: 2}
-    - {x: 2, y: 1}
-    - {x: 2, y: 0}
+    - {x: 4, y: 0}
   - playerName: Black
     escapeDir: 1
     type: 0
     botDepth: 0
     pieceColor: {r: 0.15, g: 0.15, b: 0.15, a: 1}
     exitCells:
+    - {x: 0, y: 4}
     - {x: 1, y: 4}
     - {x: 2, y: 4}
     - {x: 3, y: 4}
-    - {x: 0, y: 2}
-    - {x: 1, y: 2}
-    - {x: 2, y: 2}
+    - {x: 4, y: 4}

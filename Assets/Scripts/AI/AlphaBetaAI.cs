@@ -1,38 +1,65 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
 
-// ================================================================
-// AlphaBetaAI - Giai doan 5
-// - Trien khai IGameAI
-// - Paranoid alpha-beta cho nhieu nguoi choi
-// - Move ordering uu tien:
-//   1) thang ngay
-//   2) thoat ngay
-//   3) lam doi thu rat it / het nuoc
-//   4) block tot
-//   5) toi EvalFunction
-// ================================================================
+/// <summary>
+/// AI alpha-beta theo huong paranoid cho nhieu nguoi choi.
+/// </summary>
 public class AlphaBetaAI : IGameAI
 {
+    #region Fields
+
     private readonly int maxDepth;
     private readonly int myPlayerIndex;
 
-    const int WIN_SCORE = 1000000;
+    private const int WIN_SCORE = 1000000;
+    private const int REPEAT_PENALTY_SOFT  =   500;  // count=1
+    private const int REPEAT_PENALTY_HARD  =  2000;  // count=2
+    private const int REPEAT_PENALTY_FATAL = WIN_SCORE; // count>=maxRepeat
+    private const int MAX_REPEAT_COUNT = 3;
+
+    private Dictionary<string, int> repetitionHistory;
+
+    #endregion
+
+    #region Properties
 
     public string DisplayName => "Alpha-Beta";
 
+    #endregion
+
+    #region Constructor
+
+    /// <summary>
+    /// Khoi tao AI voi depth va player index tuong ung.
+    /// </summary>
     public AlphaBetaAI(int depth, int myPlayerIndex)
     {
         this.maxDepth = Mathf.Max(1, depth);
         this.myPlayerIndex = myPlayerIndex;
     }
 
+    #endregion
+
+    #region Public API
+
+    /// <summary>
+    /// Tim nuoc di tot nhat cho state hien tai.
+    /// </summary>
     public GameState BestMove(GameState state)
+    {
+        return BestMove(state, null);
+    }
+
+    public GameState BestMove(GameState state, Dictionary<string, int> stateHistory)
     {
         if (state == null) return null;
 
+        repetitionHistory = stateHistory;
+
         var children = DodgemRules.GetChildren(state);
         if (children == null || children.Count == 0) return null;
+
+        int effectiveDepth = GetEffectiveDepth(state, children.Count);
 
         OrderMoves(children);
 
@@ -40,11 +67,11 @@ public class AlphaBetaAI : IGameAI
         int bestScore = int.MinValue;
 
         int alpha = int.MinValue + 1;
-        int beta  = int.MaxValue - 1;
+        int beta = int.MaxValue - 1;
 
         foreach (var child in children)
         {
-            int score = Search(child, maxDepth - 1, alpha, beta);
+            int score = Search(child, effectiveDepth - 1, alpha, beta);
 
             if (score > bestScore || bestChild == null)
             {
@@ -59,6 +86,13 @@ public class AlphaBetaAI : IGameAI
         return bestChild;
     }
 
+    #endregion
+
+    #region Search
+
+    /// <summary>
+    /// Duyet cay alpha-beta theo huong paranoid minimax.
+    /// </summary>
     int Search(GameState state, int depth, int alpha, int beta)
     {
         if (depth <= 0 || state.IsTerminal())
@@ -102,16 +136,54 @@ public class AlphaBetaAI : IGameAI
         }
     }
 
+    #endregion
+
+    #region Repetition Penalty
+
+    /// <summary>
+    /// Tinh muc phat cho state da xuat hien truoc do.
+    /// Cang lap nhieu lan thi phat cang nang, tranh phat fatal o muc draw threshold.
+    /// </summary>
+    int RepetitionPenalty(GameState state)
+    {
+        if (repetitionHistory == null) return 0;
+
+        string key = state.StateKey();
+        if (!repetitionHistory.TryGetValue(key, out int count))
+            return 0;
+
+        if (count >= MAX_REPEAT_COUNT - 1)
+            return -REPEAT_PENALTY_FATAL; // gan muc hoa, tranh tuyet doi
+
+        if (count == 2)
+            return -REPEAT_PENALTY_HARD;
+
+        if (count == 1)
+            return -REPEAT_PENALTY_SOFT;
+
+        return 0;
+    }
+
+    #endregion
+
+    #region Move Ordering
+
+    /// <summary>
+    /// Sap xep nuoc di de cat tia tot hon.
+    /// </summary>
     void OrderMoves(List<GameState> children)
     {
         children.Sort((a, b) =>
         {
-            int sa = QuickMoveScore(a);
-            int sb = QuickMoveScore(b);
-            return sb.CompareTo(sa);
+            int scoreA = QuickMoveScore(a);
+            int scoreB = QuickMoveScore(b);
+            return scoreB.CompareTo(scoreA);
         });
     }
 
+    /// <summary>
+    /// Tinh diem nhanh de uu tien thu tu nuoc di.
+    /// </summary>
     int QuickMoveScore(GameState state)
     {
         var winner = state.Winner();
@@ -121,45 +193,44 @@ public class AlphaBetaAI : IGameAI
             return -WIN_SCORE;
         }
 
-        int score = 0;
+        int score = RepetitionPenalty(state);
+        if (score <= -REPEAT_PENALTY_FATAL) return score; // cat tia ngay
 
-        // 1) Uu tien nuoc lam minh thoat them quan
+        // Uu tien thoat ngay
         score += state.players[myPlayerIndex].escaped * 20000;
+        score += DodgemRules.CountImmediateEscapes(state, myPlayerIndex) * 2000;
 
-        // 2) Danh gia mobility doi thu
-        int oppMobility = 0;
-        int trappedOpps = 0;
+        // Uu tien lam doi thu it nuoc
+        int opponentMobility = 0;
+        int trappedOpponents = 0;
 
-        var tmp = state.Clone();
         for (int i = 0; i < state.NumPlayers; i++)
         {
             if (i == myPlayerIndex) continue;
 
-            tmp.currentPlayerIndex = i;
-            int moves = DodgemRules.GetChildren(tmp).Count;
+            int moves = DodgemRules.CountLegalMoves(state, i);
 
-            oppMobility += moves;
-            if (moves == 0) trappedOpps++;
+            opponentMobility += moves;
+            if (moves == 0) trappedOpponents++;
             else if (moves == 1) score += 500;
         }
 
-        score += trappedOpps * 4000;
-        score -= oppMobility * 10;
+        score += trappedOpponents * 4000;
+        score -= opponentMobility * 10;
 
-        // 3) Uu tien neu minh con nhieu lua chon
-        tmp.currentPlayerIndex = myPlayerIndex;
-        int myMobility = DodgemRules.GetChildren(tmp).Count;
+        // Uu tien minh con nhieu lua chon
+        int myMobility = DodgemRules.CountLegalMoves(state, myPlayerIndex);
         score += myMobility * 12;
 
-        // 4) Block pressure
+        // Uu tien block
         score += BlockPressureScore(state, myPlayerIndex);
-
-        // 5) Eval tong quan
-        score += EvalFunction.Eval(state, myPlayerIndex);
 
         return score;
     }
 
+    /// <summary>
+    /// Uoc luong muc do chan duong doi thu.
+    /// </summary>
     int BlockPressureScore(GameState state, int perspectiveIdx)
     {
         int score = 0;
@@ -168,16 +239,16 @@ public class AlphaBetaAI : IGameAI
         for (int oppIdx = 0; oppIdx < state.NumPlayers; oppIdx++)
         {
             if (oppIdx == perspectiveIdx) continue;
-            var opp = state.players[oppIdx];
+            var opponent = state.players[oppIdx];
 
-            foreach (var oppPos in opp.pieces)
+            foreach (var opponentPos in opponent.pieces)
             {
-                if (oppPos.x == -1) continue;
-                if (!state.IsCellPlayable(oppPos)) continue;
+                if (opponentPos.x == -1) continue;
+                if (!state.IsCellPlayable(opponentPos)) continue;
 
-                Vector2Int fwd = opp.ForwardDir();
-                Vector2Int front1 = oppPos + fwd;
-                Vector2Int front2 = oppPos + fwd + fwd;
+                Vector2Int forward = opponent.ForwardDir();
+                Vector2Int front1 = opponentPos + forward;
+                Vector2Int front2 = opponentPos + forward + forward;
 
                 foreach (var myPos in me.pieces)
                 {
@@ -191,4 +262,35 @@ public class AlphaBetaAI : IGameAI
 
         return score;
     }
+
+    #endregion
+
+    #region Depth Control
+
+    /// <summary>
+    /// Dieu chinh depth thuc te de giu AI muot hon khi nhieu bot.
+    /// </summary>
+    int GetEffectiveDepth(GameState state, int rootMoveCount)
+    {
+        int depth = maxDepth;
+
+        // Nhiều người chơi => giảm nhẹ depth
+        if (state.NumPlayers >= 3)
+            depth -= 1;
+
+        if (state.NumPlayers >= 4)
+            depth -= 1;
+
+        // Branching lớn => giảm thêm
+        if (rootMoveCount >= 18)
+            depth -= 1;
+
+        if (rootMoveCount >= 28)
+            depth -= 1;
+
+        // Giữ chênh lệch độ khó nhưng không để tụt quá sâu
+        return Mathf.Clamp(depth, 1, maxDepth);
+    }
+
+    #endregion
 }

@@ -300,9 +300,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7e9fcced25274a60b76e60c31f9b2d78, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PresetCardUI
-  txtName: {fileID: 1143930911468063244}
-  txtDesc: {fileID: 6528942136307345881}
-  txtInfo: {fileID: 8140050932396541142}
+  titleText: {fileID: 1143930911468063244}
+  descriptionText: {fileID: 6528942136307345881}
+  infoText: {fileID: 8140050932396541142}
+  backgroundImage: {fileID: 8146973566883264414}
+  normalColor: {r: 1, g: 1, b: 1, a: 1}
+  selectedColor: {r: 0.85, g: 0.95, b: 1, a: 1}
 --- !u!1 &7873971436141619302
 GameObject:
   m_ObjectHideFlags: 0

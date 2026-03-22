@@ -2,49 +2,45 @@
 using UnityEngine.UI;
 using TMPro;
 
-// ================================================================
-// PresetCardUI — gắn vào root của PresetCard prefab
-//
-// Kéo 3 TMP vào Inspector của component này.
-// MenuManager gọi SetData() để điền nội dung — không dùng
-// GetComponentsInChildren nữa nên sẽ không lẫn sang Slot/Toggle.
-//
-// Setup trong prefab:
-//   PresetCard (root)
-//   ├── Button component  ← trên root
-//   ├── Image component   ← trên root (để highlight)
-//   ├── PresetCardUI      ← script này, trên root
-//   └── Layout (Vertical)
-//       ├── Txt_Name      ← kéo vào txtName
-//       ├── Txt_Desc      ← kéo vào txtDesc
-//       └── Txt_Info      ← kéo vào txtInfo
-// ================================================================
-
+/// <summary>
+/// Hien thi mot card preset trong menu.
+/// </summary>
 public class PresetCardUI : MonoBehaviour
 {
-    [Header("Keo 3 TMP vao day (khong dung GetComponentsInChildren)")]
-    public TextMeshProUGUI txtName;   // ten preset
-    public TextMeshProUGUI txtDesc;   // mo ta
-    public TextMeshProUGUI txtInfo;   // so quan: "Trang:2q  Den:2q"
+    #region Fields
 
-    private Image cardImage;
+    [Header("UI Elements")]
+    public TextMeshProUGUI titleText;
+    public TextMeshProUGUI descriptionText;
+    public TextMeshProUGUI infoText;
+    public Image backgroundImage;
 
-    void Awake()
+    [Header("Colors")]
+    public Color normalColor = Color.white;
+    public Color selectedColor = new Color(0.85f, 0.95f, 1f, 1f);
+
+    #endregion
+
+    #region Public API
+
+    /// <summary>
+    /// Gan du lieu hien thi cho card.
+    /// </summary>
+    public void SetData(string title, string description, string info)
     {
-        cardImage = GetComponent<Image>();
+        if (titleText != null) titleText.text = title;
+        if (descriptionText != null) descriptionText.text = description;
+        if (infoText != null) infoText.text = info;
     }
 
-    public void SetData(string name, string desc, string info)
-    {
-        if (txtName != null) txtName.text = name;
-        if (txtDesc != null) txtDesc.text = desc;
-        if (txtInfo != null) txtInfo.text = info;
-    }
-
+    /// <summary>
+    /// Cap nhat trang thai dang chon cua card.
+    /// </summary>
     public void SetSelected(bool selected)
     {
-        if (cardImage == null) cardImage = GetComponent<Image>();
-        if (cardImage != null)
-            cardImage.color = selected ? new Color(0.7f, 0.9f, 1f) : Color.white;
+        if (backgroundImage != null)
+            backgroundImage.color = selected ? selectedColor : normalColor;
     }
+
+    #endregion
 }

@@ -1,22 +1,46 @@
 ﻿using UnityEngine;
 
+/// <summary>
+/// Gan cho moi o ban co de gui su kien click ve handler.
+/// </summary>
 public class CellClick : MonoBehaviour
 {
+    #region Fields
+
     public Vector2Int gridPos;
 
-    // KHÔNG dùng Start() + FindObjectOfType — trên WebGL thứ tự Awake/Start
-    // không đảm bảo giống Editor, GameManager có thể chưa tồn tại khi Start() chạy.
-    // Dùng lazy-init: chỉ tìm khi thực sự cần (lúc click).
-    private GameManager gm;
+    private ICellClickHandler clickHandler;
 
+    #endregion
+
+    #region Public API
+
+    /// <summary>
+    /// Khoi tao handler click cho o nay.
+    /// </summary>
+    public void Initialize(ICellClickHandler handler, Vector2Int position)
+    {
+        clickHandler = handler;
+        gridPos = position;
+    }
+
+    #endregion
+
+    #region Unity Lifecycle
+
+    /// <summary>
+    /// Gui su kien click ve handler da duoc gan truoc.
+    /// </summary>
     void OnMouseDown()
     {
-        if (gm == null)
-            gm = FindObjectOfType<GameManager>();
+        if (clickHandler == null)
+        {
+            Debug.LogError("[CellClick] No click handler assigned.");
+            return;
+        }
 
-        if (gm != null)
-            gm.OnCellClicked(gridPos);
-        else
-            Debug.LogError("[CellClick] Không tìm thấy GameManager!");
+        clickHandler.OnCellClicked(gridPos);
     }
+
+    #endregion
 }
